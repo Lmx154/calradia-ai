@@ -155,7 +155,10 @@ impl Backend {
                 model,
                 connect_timeout,
             } => {
-                let system = prompt::system_prompt(item.npc, &item.pname, item.day);
+                let system = item
+                    .prompt
+                    .clone()
+                    .unwrap_or_else(|| prompt::system_prompt(item.npc, &item.pname, item.day));
                 let body = json!({
                     "model": model,
                     "messages": [

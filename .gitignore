@@ -9,3 +9,8 @@ wheels/
 # Virtual environments
 .venv
 calradia-server/target/
+
+# Local conversation memory (including SQLite journal files)
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

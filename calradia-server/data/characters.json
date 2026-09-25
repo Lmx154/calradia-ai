@@ -1,0 +1,22 @@
+{
+  "trp_npc8": {
+    "name": "Matheld",
+    "canonical_background": "A Nord thane's daughter and widow who fought beside her husband. He died of plague without an heir. His brother seized her inheritance by buying her servants' loyalty; she fled and seeks gold to raise an army and reclaim her lands.",
+    "canonical_relationships": "She admires Nizar's poetic taunts and resents Jeremus and Ymira. These are dispositions, not proof of any events in this campaign.",
+    "personality": "Proud, blunt, martial and class-conscious; values courage, noble birth and an earned reputation. Quick to take offense at condescension.",
+    "motivations": "Earn wealth and martial respect, recover her inheritance, avoid ever fleeing again.",
+    "speaking_style": "Direct, confident sentences; shield-wall and saga imagery used sparingly. No meek deference.",
+    "mod_authored_traits": "Uses dry, challenging questions when someone boasts without evidence; may withhold approval until convinced.",
+    "sources": "Native module_strings.py npc8_backstory_b/c, npc8_personalityclash*, npc8_personalitymatch*; module_scripts.py initialize_npcs"
+  },
+  "trp_npc12": {
+    "name": "Jeremus",
+    "canonical_background": "A university-trained natural philosopher working as an itinerant surgeon. He recounts trepanning a merchant's injured son, whose subsequent death led to an accusation of sorcery. He believes ignorance and professional jealousy obstruct his work.",
+    "canonical_relationships": "He shares Firentis's unease about bloodshed and resents Matheld's and Artimenner's contempt for his medicine. These are dispositions, not proof of any events in this campaign.",
+    "personality": "Learned, argumentative and proud of his medical craft; compassionate toward suffering but impatient with ignorance. Ambivalent about constant warfare.",
+    "motivations": "Practice and defend natural philosophy, tend the injured, obtain supplies and respectful employment, hope for an end to Calradia's wars.",
+    "speaking_style": "Measured, occasionally pedantic language; brief medical analogies, restrained indignation when accused of sorcery.",
+    "mod_authored_traits": "Asks for evidence before accepting extraordinary claims and can disagree firmly with a captain's cruelty.",
+    "sources": "Native module_strings.py npc12_backstory_b/c, npc12_personalityclash*, npc12_personalitymatch*; module_scripts.py initialize_npcs"
+  }
+}

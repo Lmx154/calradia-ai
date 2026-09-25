@@ -61,6 +61,8 @@ struct Job {
     day: u32,
     pname: String,
     msg: String,
+    prompt: Option<String>,
+    scope: String,
     state: State,
     created: Instant,
     deadline: Instant,
@@ -114,6 +116,7 @@ pub struct WorkItem {
     pub pname: String,
     pub msg: String,
     pub deadline: Instant,
+    pub prompt: Option<String>,
 }
 
 struct Running {
@@ -156,6 +159,16 @@ impl Store {
     /// `/v1/talk`: returns the state of an existing job with the same parameters, rejects
     /// the same id with other parameters, or queues a new job.
     pub fn talk(&self, id: u32, talk: TalkParams) -> Answer {
+        self.talk_with_prompt(id, talk, None, String::new())
+    }
+
+    pub fn talk_with_prompt(
+        &self,
+        id: u32,
+        talk: TalkParams,
+        prompt: Option<String>,
+        scope: String,
+    ) -> Answer {
         let now = Instant::now();
         let mut guard = self.lock();
         let inner = &mut *guard;
@@ -166,7 +179,7 @@ impl Store {
                 log(format!("job {id} conflict: same id, different parameters"));
                 Answer::token(CODE_BAD_REQUEST, REASON_CONFLICT)
             }
-            None => self.admit(inner, id, talk, now, &mut kill),
+            None => self.admit(inner, id, talk, (prompt, scope), now, &mut kill),
         };
         drop(guard);
         shut_down(kill);
@@ -178,6 +191,7 @@ impl Store {
         inner: &mut Inner,
         id: u32,
         talk: TalkParams,
+        context: (Option<String>, String),
         now: Instant,
         kill: &mut Vec<TcpStream>,
     ) -> Answer {
@@ -187,7 +201,7 @@ impl Store {
         let victims: Vec<u32> = inner
             .jobs
             .iter()
-            .filter(|(_, j)| j.npc.id == talk.npc.id && j.is_pending())
+            .filter(|(_, j)| j.npc.id == talk.npc.id && j.scope == context.1 && j.is_pending())
             .map(|(v, _)| *v)
             .collect();
         let waiting = inner.queue.iter().filter(|q| !victims.contains(q)).count();
@@ -239,6 +253,8 @@ impl Store {
                 day: talk.day,
                 pname: talk.pname,
                 msg: talk.msg,
+                prompt: context.0,
+                scope: context.1,
                 state: State::Pending,
                 created: now,
                 deadline: now + self.limits.deadline,
@@ -332,6 +348,7 @@ impl Store {
                     pname: job.pname.clone(),
                     msg: job.msg.clone(),
                     deadline: job.deadline,
+                    prompt: job.prompt.clone(),
                 };
                 inner.running = Some(Running { id, conn: None });
                 return item;

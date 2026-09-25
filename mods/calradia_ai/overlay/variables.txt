@@ -1280,3 +1280,16 @@ cai_obj_cancel
 cai_obj_reset
 cai_obj_close
 cai_tx_abandoned
+cai_ui_open
+cai_ack_owed_job
+cai_ack_confirmed
+cai_npc
+cai_campaign_a
+cai_campaign_b
+cai_branch_a
+cai_branch_b
+cai_session_a
+cai_session_b
+cai_memory_confirmed
+cai_obj_continue
+cai_obj_branch

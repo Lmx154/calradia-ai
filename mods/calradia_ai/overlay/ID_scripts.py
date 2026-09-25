@@ -610,5 +610,6 @@ script_add_player_to_cur_tableau_for_coop = 608
 script_add_troop_to_cur_tableau_for_coop = 609
 script_cai_new_id = 610
 script_cai_tx_send = 611
+script_cai_close = 612
 
 

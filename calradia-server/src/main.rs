@@ -8,6 +8,7 @@
 
 mod http;
 mod jobs;
+mod living;
 mod npc;
 mod prompt;
 mod protocol;
@@ -35,6 +36,9 @@ usage: calradia-server [options]
   --upstream URL        OpenAI-compatible base URL, http only
                         (env CALRADIA_UPSTREAM, default http://172.17.0.1:8080/v1)
   --model NAME          model name (env CALRADIA_MODEL, default calradia-qwen3.5-9b)
+  --profiles PATH      editable character JSON (default bundled data/characters.json)
+  --world PATH         vanilla ID dictionary JSON (default bundled data/world.json)
+  --memory PATH        SQLite memory file (default ./calradia-memory.sqlite3)
   --fake-llm            skip the upstream; answer a canned reply after 1.5 s
   --fault MODE          misbehave on purpose on /v1/*, for testing the game:
                         hang, close, empty, wrong-rid, malformed, delay,
@@ -110,6 +114,9 @@ struct Options {
     bind: String,
     upstream: String,
     model: String,
+    profiles: String,
+    world: String,
+    memory: String,
     fake_llm: bool,
     fault: Option<Fault>,
     limits: Limits,
@@ -130,6 +137,9 @@ fn parse_args(
         bind: DEFAULT_BIND.to_string(),
         upstream: from_env("CALRADIA_UPSTREAM", DEFAULT_UPSTREAM),
         model: from_env("CALRADIA_MODEL", DEFAULT_MODEL),
+        profiles: living::DEFAULT_PROFILES.into(),
+        world: living::DEFAULT_WORLD.into(),
+        memory: living::DEFAULT_MEMORY.into(),
         fake_llm: false,
         fault: None,
         limits: Limits::default(),
@@ -144,6 +154,9 @@ fn parse_args(
             "--bind" => o.bind = value()?,
             "--upstream" => o.upstream = value()?,
             "--model" => o.model = value()?,
+            "--profiles" => o.profiles = value()?,
+            "--world" => o.world = value()?,
+            "--memory" => o.memory = value()?,
             "--fake-llm" => o.fake_llm = true,
             "--fault" => o.fault = Some(parse_fault(&value()?)?),
             "--max-jobs" => o.limits.max_jobs = count(value()?)? as usize,
@@ -213,6 +226,13 @@ fn main() {
             process::exit(1);
         }
     };
+    let living = match living::Living::open(&opts.memory, &opts.profiles, &opts.world) {
+        Ok(memory) => memory,
+        Err(e) => {
+            eprintln!("error: character memory initialization failed: {e}");
+            process::exit(1);
+        }
+    };
     if let Some(fault) = opts.fault {
         let bar = "!".repeat(72);
         eprintln!(
@@ -230,7 +250,14 @@ fn main() {
         "calradia-server listening on {}; {source}; limits {:?}",
         opts.bind, opts.limits
     ));
-    if let Err(e) = start(listener, opts.limits, backend, opts.fault, npc::NPCS) {
+    if let Err(e) = start_with_living(
+        listener,
+        opts.limits,
+        backend,
+        opts.fault,
+        npc::NPCS,
+        Some(living),
+    ) {
         eprintln!("error: {e}");
         process::exit(1);
     }
@@ -240,9 +267,11 @@ struct App {
     store: Arc<Store>,
     npcs: &'static [Npc],
     fault: Option<Fault>,
+    living: Option<living::Living>,
 }
 
 /// Starts the worker, then accepts connections forever, one thread per connection.
+#[cfg(test)]
 fn start(
     listener: TcpListener,
     limits: Limits,
@@ -250,9 +279,25 @@ fn start(
     fault: Option<Fault>,
     npcs: &'static [Npc],
 ) -> std::io::Result<()> {
+    start_with_living(listener, limits, backend, fault, npcs, None)
+}
+
+fn start_with_living(
+    listener: TcpListener,
+    limits: Limits,
+    backend: Backend,
+    fault: Option<Fault>,
+    npcs: &'static [Npc],
+    living: Option<living::Living>,
+) -> std::io::Result<()> {
     let store = Arc::new(Store::new(limits));
     jobs::spawn_worker(store.clone(), backend)?;
-    let app = Arc::new(App { store, npcs, fault });
+    let app = Arc::new(App {
+        store,
+        npcs,
+        fault,
+        living,
+    });
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
@@ -274,6 +319,30 @@ struct Outcome {
 
 impl App {
     fn respond(&self, req: &Request) -> Outcome {
+        if req.path.starts_with("/v2/") {
+            return match living::parse(req) {
+                Err(e) => Outcome {
+                    rid: e.rid,
+                    code: CODE_BAD_REQUEST,
+                    text: e.reason.into(),
+                },
+                Ok(input) => {
+                    let a = self
+                        .living
+                        .as_ref()
+                        .map(|memory| memory.respond(&input, &self.store))
+                        .unwrap_or(jobs::Answer {
+                            code: protocol::CODE_FAILED,
+                            text: "memory_unavailable".into(),
+                        });
+                    Outcome {
+                        rid: input.rid,
+                        code: a.code,
+                        text: a.text,
+                    }
+                }
+            };
+        }
         match protocol::parse_v1(req, self.npcs) {
             Err(rejection) => Outcome {
                 rid: rejection.rid,

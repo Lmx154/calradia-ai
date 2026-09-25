@@ -3041,8 +3041,9 @@ game_menus = [
        ),
       # --- Calradia AI (milestone 2): talk with an NPC through the local calradia-server ---
       # The conversation lives in prsnt_cai_talk; see docs/protocol-v1.md.
-      ("cai_talk",[],"Talk with Hrodvar.",
-       [(start_presentation, "prsnt_cai_talk"),
+      ("cai_talk",[],"AI transport test (Hrodvar, no memory).",
+       [(assign, "$cai_npc", 0),
+        (start_presentation, "prsnt_cai_talk"),
         ]
        ),
       # --- end Calradia AI ---
