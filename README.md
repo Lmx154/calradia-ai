@@ -227,7 +227,9 @@ Known limitations:
 - Messages are ASCII only, at most 300 characters.
 - `{ }` and `^` in messages are interpreted by the engine.
 - Replies are capped at 500 characters.
-- There is one NPC and no memory between messages.
+- The text box has no cursor movement (engine limitation).
+- There is one NPC. The conversation window shows the last 4 exchanges, but the NPC
+  has no memory of them.
 
 ## Tests and linting
 

@@ -13652,19 +13652,22 @@ presentations = [
       (position_set_y, pos1, 1500),
       (overlay_set_size, reg1, pos1),
 
-      # The player's last message.
-      (create_text_overlay, "$cai_obj_you", "str_empty_string", tf_left_align),
-      (position_set_x, pos1, 80),
-      (position_set_y, pos1, 620),
-      (overlay_set_position, "$cai_obj_you", pos1),
-
-      # Hrodvar's reply, scrollable.
+      # The conversation log in one bounded, scrollable area, newest exchange first
+      # (scripts cannot scroll an overlay, so the newest text must be at the top).
+      # While the window is open: s64 = the player's last message, s60..s63 = the last
+      # four exchanges, newest first. Copies use str_store_string_reg so that text is
+      # not expanded again.
+      (str_clear, s60),
+      (str_clear, s61),
+      (str_clear, s62),
+      (str_clear, s63),
+      (str_clear, s64),
       (create_text_overlay, "$cai_obj_reply", "str_empty_string", tf_scrollable),
       (position_set_x, pos1, 80),
-      (position_set_y, pos1, 270),
+      (position_set_y, pos1, 260),
       (overlay_set_position, "$cai_obj_reply", pos1),
       (position_set_x, pos1, 840),
-      (position_set_y, pos1, 330),
+      (position_set_y, pos1, 390),
       (overlay_set_area_size, "$cai_obj_reply", pos1),
 
       # Conversation status, and below it transport warnings.
@@ -13679,6 +13682,8 @@ presentations = [
       (overlay_set_position, "$cai_obj_warn", pos1),
 
       # The draft message; every edit arrives as a state change with the text in s0.
+      # The simple text box has no cursor movement (engine limitation). The full text box
+      # (create_text_box_overlay) was tried in game and holds only ~20 characters.
       (create_simple_text_box_overlay, "$cai_obj_text_box"),
       (position_set_x, pos1, 80),
       (position_set_y, pos1, 130),
@@ -13717,13 +13722,19 @@ presentations = [
       (try_begin),
         (eq, "$cai_reply_new", 1),
         (assign, "$cai_reply_new", 0),
+        # Push the finished exchange onto the log; the oldest of four drops off.
+        (str_store_string_reg, s63, s62),
+        (str_store_string_reg, s62, s61),
+        (str_store_string_reg, s61, s60),
         (try_begin),
           (eq, "$cai_conv_state", CAI_CONV_READY),
-          (overlay_set_text, "$cai_obj_reply", s67),
+          (str_store_string, s60, "@You: {s64}^Hrodvar: {s67}"),
           (overlay_set_text, "$cai_obj_status", "@Hrodvar has answered."),
         (else_try),
+          (str_store_string, s60, "@You: {s64}^({s67})"),
           (overlay_set_text, "$cai_obj_status", s67),
         (try_end),
+        (overlay_set_text, "$cai_obj_reply", "@{s60}^^{s61}^^{s62}^^{s63}"),
       (try_end),
 
       # Give up on a conversation that is still waiting.
@@ -13732,7 +13743,8 @@ presentations = [
         (store_sub, ":waited", ":now", "$cai_conv_start_ms"),
         (ge, ":waited", CAI_GIVE_UP_MS),
         (assign, "$cai_conv_state", CAI_CONV_FAILED),
-        (overlay_set_text, "$cai_obj_status", "@Hrodvar does not answer."),
+        (str_store_string, s67, "@Hrodvar does not answer."),
+        (assign, "$cai_reply_new", 1),
       (try_end),
 
       # With the transport idle: an owed cancel first, otherwise the next poll.
@@ -13824,8 +13836,8 @@ presentations = [
           (assign, "$cai_conv_job", reg0),
           (assign, "$cai_conv_state", CAI_CONV_SUBMITTING),
           (assign, "$cai_conv_start_ms", "$cai_now_ms"),
-          (overlay_set_text, "$cai_obj_you", "@You: {s66}"),
-          (overlay_set_text, "$cai_obj_reply", "str_empty_string"),
+          (str_store_string, s64, s66),
+          (overlay_set_text, "$cai_obj_reply", "@You: {s64}^Hrodvar is thinking...^^{s60}^^{s61}^^{s62}"),
           (overlay_set_text, "$cai_obj_status", "@Waiting for Hrodvar..."),
           (call_script, "script_cai_tx_send", CAI_OP_TALK, "$cai_conv_job"),
           (str_clear, s66),
@@ -13838,7 +13850,8 @@ presentations = [
           (is_between, "$cai_conv_state", CAI_CONV_SUBMITTING, CAI_CONV_PENDING + 1),
           (assign, "$cai_conv_state", CAI_CONV_CANCELED),
           (assign, "$cai_cancel_owed_job", "$cai_conv_job"),
-          (overlay_set_text, "$cai_obj_status", "@You stopped waiting for Hrodvar."),
+          (str_store_string, s67, "@You stopped waiting for Hrodvar."),
+          (assign, "$cai_reply_new", 1),
         (try_end),
       (else_try),
         (eq, ":object", "$cai_obj_reset"),

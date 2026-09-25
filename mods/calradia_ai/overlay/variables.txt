@@ -1271,7 +1271,6 @@ cai_conv_start_ms
 cai_cancel_owed_job
 cai_reply_new
 cai_ui_warn
-cai_obj_you
 cai_obj_reply
 cai_obj_status
 cai_obj_warn

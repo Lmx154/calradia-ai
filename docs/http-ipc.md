@@ -78,6 +78,16 @@ ids, submit/poll/cancel jobs, and one sanitizer.
   - Vanilla has no string operation to escape braces, so this is a known limitation.
 - **The simple text box delivers its text as the player types.** Clicking Say without
   pressing Enter sends the current text. **[live]**
+- **Text boxes.** **[live]**
+  - The simple text box accepts long input and scrolls horizontally, but it has no
+    cursor movement: no arrow keys and no clicking into the text.
+  - The full text box (`create_text_box_overlay`, which vanilla never uses) holds only
+    about 20 characters and was placed partly off-screen, so it is unusable for chat.
+  - Module scripts have no string-editing operations, so a custom editor is not possible
+    either.
+- **Scrollable text overlays** (`tf_scrollable` plus `overlay_set_area_size`) show a
+  scrollbar once the text is taller than the area. Scripts cannot scroll them, so the
+  conversation log is shown newest-first. **[live]**
 - **Logical cancel works as designed.** The owed `/v1/cancel` arrived about 0.6 s after
   the talk, the job became CANCELED, and the model's late result was discarded.
   **[live]**
