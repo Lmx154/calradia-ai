@@ -1,7 +1,36 @@
 [project]
 name = "calradia-ai"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python 3 modernization of the original TaleWorlds Mount&Blade: Warband Module System 1.171"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = []
+
+[project.scripts]
+warband-build = "modsys.build:main"
+warband-build-data = "modsys.module_data:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/modsys"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: runs one or more full module builds"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["tests/golden"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.format]
+exclude = ["game/**"]
