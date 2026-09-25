@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 
 pub const DEFAULT_UPSTREAM: &str = "http://172.17.0.1:8080/v1";
 pub const DEFAULT_MODEL: &str = "calradia-qwen3.5-9b";
-const MAX_TOKENS: u32 = 220;
 const TEMPERATURE: f64 = 0.8;
 /// Cap on the upstream response's status line plus headers.
 const MAX_RESPONSE_HEAD: usize = 64 * 1024;
@@ -161,13 +160,17 @@ impl Backend {
                     .iter()
                     .map(|(role, content)| json!({"role": role, "content": content}))
                     .collect();
-                let body = json!({
+                let mut body = json!({
                     "model": model,
                     "messages": messages,
-                    "max_tokens": MAX_TOKENS,
+                    "max_tokens": chat.max_tokens,
                     "temperature": TEMPERATURE,
                     "chat_template_kwargs": {"enable_thinking": false},
                 });
+                if chat.json {
+                    // llama.cpp constrains the answer to a JSON object.
+                    body["response_format"] = json!({"type": "json_object"});
+                }
                 let conn = connect(endpoint, deadline, *connect_timeout)?;
                 if !attach(&conn) {
                     return Err(Failure::new(

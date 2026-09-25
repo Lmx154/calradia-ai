@@ -424,6 +424,7 @@ fn success_round_trip_and_upstream_request_shape() {
     assert_eq!(body["model"], "test-model");
     assert_eq!(body["max_tokens"], 220);
     assert_eq!(body["temperature"], 0.8);
+    assert!(body.get("response_format").is_none());
     assert_eq!(
         body["chat_template_kwargs"],
         json!({"enable_thinking": false})
@@ -2290,6 +2291,10 @@ fn autonomy_can_be_turned_off_and_bad_plans_are_dropped() {
     let on = server_with(&up.url, memory.clone(), true, true);
     send2(on, &tick_url(3001, 31, 0, 1, 0));
     wait_until("planning ran", || up.hits() == 1);
+    // Planning asks for a JSON object, with room for a whole letter.
+    let (_, body) = up.request(0);
+    assert_eq!(body["response_format"], json!({"type": "json_object"}));
+    assert_eq!(body["max_tokens"], 400);
     thread::sleep(Duration::from_millis(200));
     assert_eq!(
         memory.latest_plan(7, 31, "trp_kingdom_1_lord").unwrap(),

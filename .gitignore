@@ -14,3 +14,6 @@ calradia-server/target/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
+
+# Server logs of tools/calradia_check.py (pipeline and play sessions)
+logs/

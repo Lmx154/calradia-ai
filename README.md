@@ -234,6 +234,8 @@ Override them with `--upstream`/`CALRADIA_UPSTREAM` and `--model`/`CALRADIA_MODE
 
 To run it, close Warband before building or installing the mod. Changing module files
 during a session can leave saves unusable; the game loads the files only at startup.
+`tools/calradia_check.py` does all of this and checks the result (see
+[Local verification](#local-verification)); by hand:
 
 ```bash
 GAME=~/.steam/steam/steamapps/common/"MountBlade Warband"
@@ -252,16 +254,29 @@ window, **Reset** appears after 15 seconds; restart the server before clicking i
 **Cancel** stops waiting for the reply and sends the cancellation when the transport
 is free.
 
-For manual tests, build the server with
-`cargo build --offline --release --manifest-path calradia-server/Cargo.toml`, then run
-`calradia-server/target/release/calradia-server --fake-llm` for a canned reply after
-1.5 seconds. For "Speak freely.", the canned reply summarizes what the prompt contained
-(character, faction, day, relation, and the memories recalled), which checks the
-plumbing without a model. `--fault MODE` injects failures (`hang`, `close`, `empty`, `wrong-rid`,
-`malformed`, `delay`) or test text (`oversize-3000`, `nonascii`). Use
-`--fake-llm --deadline-secs 1` to test a model timeout. Run one server at a time on
-port 8766, restarting it between tests; see the
-[manual acceptance checklist](docs/http-ipc.md#milestone-2-acceptance-tests).
+### Local verification
+
+On the machine with Warband and the model server, one command runs every check short of
+playing:
+
+```bash
+uv run python tools/calradia_check.py all     # tests, install into Warband, pipeline
+uv run python tools/calradia_check.py serve   # then: calradia-server for a play session
+```
+
+The pipeline stage plays the game's side of the protocol with the real model. It sends
+the request templates compiled into the installed mod, filled as the engine fills them,
+to a private calradia-server, and checks every answer as the mod's callback does. It
+covers Milestones 2 to 6: memory across windows, restarts and older saves, world news,
+actions reaching the game, and plans with their acts. Then the player runs
+[`docs/in-game-test.md`](docs/in-game-test.md), while `report` shows the server's side
+of each step. [`CLAUDE.md`](CLAUDE.md) is the procedure for the agent on the desktop.
+
+`--fake-llm` (a canned reply after 1.5 seconds) and `--fault MODE` (`hang`, `close`,
+`empty`, `wrong-rid`, `malformed`, `delay`, `oversize-3000`, `nonascii`) are for the
+automated tests and for the Milestone 2 transport checks
+([acceptance tests](docs/http-ipc.md#milestone-2-acceptance-tests)), not for testing
+characters.
 
 Further reading:
 - [`docs/protocol-v1.md`](docs/protocol-v1.md): the game↔server contract.
@@ -299,6 +314,7 @@ cargo fmt --manifest-path calradia-server/Cargo.toml --check
 | `test_module_data.py` | The Module_data output is byte-identical to the reference. |
 | `test_calradia_ai.py` | The CalradiaAI overlay builds in one pass. Vanilla output is preserved (untouched files are byte-identical, and vanilla scripts, presentations and dialog lines are an unchanged prefix, so no dialog id moves). There is a single send site, the mod's code uses only whitelisted (read-only) operations and writes only `cai_*` globals, the URL templates follow the protocol rules, the protocol constants match `calradia-server/src/protocol.rs`, and the server embeds the ID files the mod uses. |
 | `test_driver_unit.py` | The driver's own logic, tested against a small fake module (fixpoint, error detection, guards, publishing). |
+| `test_calradia_check.py` | The local check tool's engine emulation: URL encoding, exact template filling, frame checks, the snapshot shape, and head tracking like the mod. (`test_calradia_ai.py` checks that it fills every template of the built mod.) |
 
 Ruff applies the full rule set to `src/` and `tests/`. For the legacy `game/` tree, it
 only checks for syntax errors and undefined names, and it does not format that tree. This

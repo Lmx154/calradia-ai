@@ -29,6 +29,12 @@ const RULES: &str = "Stay in character. Reply in 1 to 3 sentences of plain text.
     emojis, markdown, asterisks or stage directions. Never mention being an AI or anything \
     modern.";
 
+/// Tokens a spoken reply may take: 1 to 3 sentences and an `ACTION:` line.
+pub const TALK_MAX_TOKENS: u32 = 220;
+/// Tokens a planning answer may take: JSON with a goal, a plan and a letter of up to 60
+/// words (planner::instructions), with room to spare so it is never cut mid-object.
+pub const PLAN_MAX_TOKENS: u32 = 400;
+
 /// The messages of one chat completion, and what `--fake-llm` answers instead.
 #[derive(Debug, PartialEq)]
 pub struct Chat {
@@ -36,6 +42,10 @@ pub struct Chat {
     pub messages: Vec<(&'static str, String)>,
     /// A deterministic summary of what the prompt contains (v2 only; empty for v1).
     pub fake_reply: String,
+    /// The completion's token limit.
+    pub max_tokens: u32,
+    /// Ask the model server for a JSON object (planning).
+    pub json: bool,
 }
 
 impl Chat {
@@ -69,6 +79,8 @@ pub fn v1_chat(npc: &Npc, pname: &str, day: u32, msg: &str) -> Chat {
             ("user", msg.to_string()),
         ],
         fake_reply: String::new(),
+        max_tokens: TALK_MAX_TOKENS,
+        json: false,
     }
 }
 
@@ -602,6 +614,8 @@ fn assemble(
     Chat {
         messages,
         fake_reply: fake,
+        max_tokens: TALK_MAX_TOKENS,
+        json: false,
     }
 }
 
@@ -670,6 +684,8 @@ pub fn plan_chat(
     Chat {
         messages: vec![("system", system), ("user", "Decide now.".to_string())],
         fake_reply,
+        max_tokens: PLAN_MAX_TOKENS,
+        json: true,
     }
 }
 

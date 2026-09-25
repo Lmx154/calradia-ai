@@ -39,9 +39,8 @@ These milestones build on the character memory of Milestone 3
 
 Server switches: `--no-actions`, `--no-autonomy`, `--log-prompts` (see what each character
 was told), `--memory-report` (per campaign: conversations, world nodes and events, plans,
-initiatives). With `--fake-llm`, conversations summarize what the character knows,
-planning writes a "[fake]" letter every tick, and an `ACTION: ...` typed in your message is
-echoed as the character's proposal, so the game side can be tested without a model.
+initiatives). `--fake-llm` exists only for the automated tests, which run without a
+model. All local testing uses the real model.
 
 ## Limits and known gaps
 
@@ -53,27 +52,20 @@ echoed as the character's proposal, so the game side can be tested without a mod
   trigger runs are unverified in game.
 - Acts are deliberately small. Characters cannot declare war, defect, move armies or give
   land.
-- Planning needs a model that can answer in JSON. Answers that are not valid JSON are
-  logged and dropped, and the character keeps its old plan.
+- Planning needs a model that can answer in JSON. The server asks for a JSON object
+  (`response_format`, which llama.cpp enforces) and allows 400 tokens, against 220 for a
+  spoken reply. Answers that are still not valid JSON are logged and dropped, and the
+  character keeps its old plan.
 
-## In-game validation checklist
+## Validation
 
-Run the real server with `--log-prompts` (and a scratch `--memory-db`), build and install
-the mod while Warband is closed, and start a **new game**. Record result and date.
+Automated: `cargo test` covers the world chain, snapshot diffs, action validation,
+outcomes, planning, preemption and initiative delivery. Before any play session,
+`uv run python tools/calradia_check.py all` replays the installed mod's own requests
+against calradia-server and the real model: news from a log entry and from snapshots,
+news in a lord's prompt, actions the model proposes (each validated one must reach the
+game's frame), a refused offer remembered, and a plan with its act delivered on the next
+tick.
 
-| # | Step | Expected | Result / date |
-|---|---|---|---|
-| W1 | Travel the map for a day. | Server log: `world campaign ... day N: ...` lines and `tick ...: planning queued`; `--memory-report` shows world nodes. No stutter in game. | untested |
-| W2 | Fight and beat a bandit party or a lord; then talk to a lord of that realm. | His prompt (logged) lists the battle; he may mention it. | untested |
-| W3 | Wait until a war or peace is declared (or a castle falls); talk to a lord of the realm. | The event is in his prompt. | untested |
-| W4 | Save; travel until a new event; reload the save; talk to the same lord. | The newer event is not in his prompt. | untested |
-| W5 | Stop calradia-server while on the map for a game day, then start it. | No errors in game; forwarding resumes. | untested |
-| A1 | With `--fake-llm`, talk to a lord and type `ACTION: relation 2`. | Native's "relation improved" message; the relation changes on the character screen. | untested |
-| A2 | With `--fake-llm`, type `ACTION: give 50` to a lord with a purse. | Status "... offers you 50 denars."; Accept and Refuse appear, Say is faded; Accept adds 50 denars. | untested |
-| A3 | Type `ACTION: ask 50`; Refuse. Talk again and ask about it. | No gold moves; the next prompt says the offer was refused. | untested |
-| A4 | Close the window while an offer is shown. | Counted as refused; no gold moves. | untested |
-| A5 | With the real model, provoke or flatter a lord. | Occasional relation changes, never more than 5 per day per lord. | untested |
-| M1 | Play a few days with `--fake-llm`. | Letters "[fake] ... writes to ..." pop up (at most one per day). | untested |
-| M2 | With the real model, play a week, then talk to a king. | His prompt shows "Your private aims"; letters read in character. | untested |
-| M3 | Talk while planning runs (log: "planning for ..."). | Log: "background task preempted by a talk"; the reply is not delayed by planning. | untested |
-| M4 | Regression: all Milestone 3 checks and Hrodvar. | Unchanged. | untested |
+In game: Parts 2 to 4 of [`in-game-test.md`](in-game-test.md). The session is run by
+the player, with the agent on the desktop checking the server side ([`CLAUDE.md`](../CLAUDE.md)).

@@ -20,7 +20,7 @@ from collections.abc import Iterator
 
 import pytest
 from golden_compare import GOLDEN_EXPORT, REPO, SOURCE
-from support import read_output
+from support import load_local_check, read_output
 
 from modsys.build import build
 
@@ -838,3 +838,23 @@ def test_one_simple_trigger_is_appended_and_only_calls_the_background_sender(
     by_name = header_operations()
     send = (TAG_SCRIPT << OP_NUM_VALUE_BITS) | script_index(mod, b"cai_background_send")
     assert new_simple_trigger(mod) == [(by_name["call_script"], [send])]
+
+
+def test_local_check_fills_every_request_template(mod: dict[str, bytes]) -> None:
+    """tools/calradia_check.py replays exactly the fields the mod sends, on every route."""
+    check = load_local_check()
+    templates = check.load_templates(mod["quick_strings.txt"].decode("cp1254"))
+    assert sorted(templates) == sorted(check.ROUTES)
+    game = check.Game(templates, 1, check.World())
+    values = {
+        "v1/talk": game.v1_talk_values(2, "Hi"),
+        "v1/result": {"job": 2},
+        "v1/cancel": {"job": 2},
+        "v2/talk": game.talk_values("trp_npc1", "Hi", 1, 2, 0),
+        "v2/event": game.event_values(2, 1, 11),
+        "v2/world": game.world_values(2),
+        "v2/tick": game.tick_values(2),
+    }
+    for route, template in templates.items():
+        url = check.fill(template, {"rid": 1, **values[route]}, 1)
+        assert url.startswith(f"http://127.0.0.1:1/{route}?") and url.endswith("&end=1")

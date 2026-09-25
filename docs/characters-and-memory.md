@@ -156,40 +156,16 @@ covers them:
 4. **Names.** `str_store_faction_name` for companions (faction "Commoners") and for
    `$players_kingdom`.
 
-## Manual validation checklist
+## In-game validation
 
-Build and install the mod while Warband is closed, then run the real model server:
-
-```bash
-uv run warband-build --overlay mods/calradia_ai/overlay -o "$GAME/Modules/CalradiaAI"
-cargo run --release --manifest-path calradia-server/Cargo.toml -- --log-prompts
-```
-
-Before checking identity and context with a model, you can check the plumbing with
-`--fake-llm`: its reply names the character, faction, day and relation, and the memories
-recalled. Use a scratch `--memory-db` for testing. `--memory-report` shows what is
-stored. Record the result and the date for each row.
-
-| # | Step | Expected | Result / date |
-|---|---|---|---|
-| 1 | Start a new campaign. | | untested |
-| 2 | Talk to a lord on the map, and to a companion in your party (for example Borcha, from a tavern). Pick **Speak freely.** | The window opens, titled with the character's name. Vanilla options are all still listed above it. Closing the window returns to "Anything else?". | untested |
-| 3 | Ask "Who are you?" | Borcha talks like Borcha ("boss", horses, debts); King Harlaus sounds unlike him. | untested |
-| 4 | Ask where you are, what realm they serve, and how they feel about you. | Matches the game: nearest settlement, faction, relation sign, ruler/marshal/prisoner status. With `--log-prompts`, the logged situation matches the character screen. | untested |
-| 5 | Tell the NPC something distinctive ("My sister Ylfa keeps an inn in Sargoth"). | | untested |
-| 6 | Close the window; end the dialog. | | untested |
-| 7 | Speak to the same NPC again (new "Speak freely."). | | untested |
-| 8 | Ask "Do you remember my sister?" | The NPC recalls it. The server log shows `1 recent` or `relevant`. | untested |
-| 9 | Save, and exit Warband. | | untested |
-| 10 | Restart Warband and calradia-server. | | untested |
-| 11 | Load the save. | | untested |
-| 12 | Speak to the NPC and ask about the sister again. | Still remembered. | untested |
-| 13 | Start a new campaign (or load a save from before step 5). | | untested |
-| 14 | Speak to the same NPC. | No memory of the sister. `--memory-report` shows a separate campaign (for a new campaign). | untested |
-| 15 | Branch check: save, tell the NPC something new, then reload that save without saving and ask about it. | Not remembered. | untested |
-| 16 | Cancel while the NPC is thinking, then speak again. | The canceled reply is never mentioned. | untested |
-| 17 | Stop the model server (keep calradia-server running) and Say something. | "... could not answer (upstream_unavailable)." Nothing is stored. | untested |
-| 18 | Regression: Camp → Talk with Hrodvar; Milestone 2 tests 5-9 in `http-ipc.md`. | Unchanged. | untested |
+The in-game checks for this milestone are Part 1 of
+[`in-game-test.md`](in-game-test.md): one play session with the real model, prepared and
+checked from the server side by the agent on the player's desktop
+([`CLAUDE.md`](../CLAUDE.md)). Before that session,
+`uv run python tools/calradia_check.py all` replays the installed mod's own requests
+against calradia-server and the model. That replay covers identity, context, memory
+across windows, a server restart, an older save, Cancel and a new campaign, as far as the
+server can show them.
 
 ## What is automated, and what is not
 
@@ -218,5 +194,5 @@ Manually verified: nothing yet in game. On 2026-09-25 the release binary was run
 with `--fake-llm`: a `/v2/talk`, a server restart, then a talk naming the first reply as
 its head. The recall worked, as the log and `--memory-report` showed.
 
-Untested until the checklist above is run in Warband: every in-game behavior, the four
+Untested until [`in-game-test.md`](in-game-test.md) is run in Warband: every in-game behavior, the four
 engine assumptions above, and the quality of real model output.
