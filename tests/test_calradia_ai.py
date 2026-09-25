@@ -1,15 +1,16 @@
 """CalradiaAI mod (vanilla + mods/calradia_ai/overlay): builds, and changes only what it should.
 
-The mod adds one camp-menu option, the presentation prsnt_cai_talk, the scripts cai_new_id and
-cai_tx_send, a new body for script_game_receive_url_response, and cai_* global variables
-(docs/protocol-v1.md). Everything else must stay vanilla:
+The mod adds one camp-menu option, two "Speak freely." dialog options (lord_talk and
+member_talk), the presentation prsnt_cai_talk, the scripts cai_new_id, cai_tx_send,
+cai_store_npc_name and cai_store_context, a new body for script_game_receive_url_response, and
+cai_* global variables (docs/protocol-v1.md). Everything else must stay vanilla:
 - files the mod does not touch are byte-identical to the golden export;
 - in the touched files, vanilla content differs only by renumbered quick-string operands
   (tag_quick_string), following the exact old -> new index mapping of quick_strings.txt;
-- new presentations and scripts are appended, so no vanilla ID moves.
-The mod's own code is checked against an opcode whitelist and may only write cai_* globals,
-so it cannot change game state, and send_message_to_url (opcode 380) exists only in
-script_cai_tx_send.
+- new presentations, scripts and dialog lines are appended, so no vanilla ID moves.
+The mod's own code is checked against an opcode whitelist and may only write cai_* globals
+(it reads a few vanilla ones), so it cannot change game state, and send_message_to_url
+(opcode 380) exists only in script_cai_tx_send.
 """
 
 from __future__ import annotations
@@ -57,15 +58,23 @@ NEW_VARIABLES = [
     b"cai_obj_reset",
     b"cai_obj_close",
     b"cai_tx_abandoned",
+    b"cai_talk_troop",
+    b"cai_campaign",
+    b"cai_mem_head",
+    b"cai_conv_id",
 ]
-NEW_SCRIPTS = [b"cai_new_id", b"cai_tx_send"]
+NEW_SCRIPTS = [b"cai_new_id", b"cai_tx_send", b"cai_store_npc_name", b"cai_store_context"]
 CHANGED_SCRIPT = b"game_receive_url_response"
 NEW_PRESENTATION = b"prsnt_cai_talk"
 MENU_OPTION = b"mno_cai_talk"
 
+# The appended dialog lines: (input state, output state), in order.
+NEW_DIALOGS = [(b"lord_talk", b"lord_pretalk"), (b"member_talk", b"member_pretalk")]
+
 # Files whose only permitted differences are renumbered quick-string operands.
-QSTR_ONLY = ["conversation.txt", "mission_templates.txt", "simple_triggers.txt", "triggers.txt"]
+QSTR_ONLY = ["mission_templates.txt", "simple_triggers.txt", "triggers.txt"]
 CHANGED = {
+    "conversation.txt",
     "menus.txt",
     "presentations.txt",
     "scripts.txt",
@@ -75,10 +84,22 @@ CHANGED = {
 }
 
 # Everything the mod's own code may execute: flow control, arithmetic on locals, registers
-# and cai_* globals, string registers, reading the player's name and the day, the HTTP send,
-# and its own presentation's overlays. Nothing that writes troops, parties, factions, items,
-# slots, quests or other game state.
+# and cai_* globals, string registers, reading game state (names, the day, troop and faction
+# slots, relations, distances), the HTTP send, and its own presentation's overlays. Nothing
+# that writes troops, parties, factions, items, slots, quests or other game state.
 ALLOWED_OPERATIONS = {
+    "troop_is_hero",
+    "main_party_has_troop",
+    "troop_slot_eq",
+    "faction_slot_eq",
+    "troop_get_slot",
+    "troop_get_type",
+    "store_troop_faction",
+    "store_relation",
+    "store_distance_to_party_from_party",
+    "str_store_faction_name",
+    "str_store_party_name",
+    "val_or",
     "call_script",
     "try_begin",
     "else_try",
@@ -122,6 +143,29 @@ ALLOWED_OPERATIONS = {
     "overlay_set_area_size",
     "overlay_set_display",
 }
+
+# Operations whose first operand is written. Every other operand is only read.
+WRITES_FIRST_OPERAND = {
+    "assign",
+    "val_add",
+    "val_sub",
+    "val_mod",
+    "val_or",
+    "store_sub",
+    "store_mul",
+    "store_random_in_range",
+    "store_current_day",
+    "store_script_param",
+    "store_trigger_param_1",
+    "troop_get_slot",
+    "troop_get_type",
+    "store_troop_faction",
+    "store_relation",
+    "store_distance_to_party_from_party",
+}
+# The vanilla globals the mod reads (never writes): the dialog partner, and the player's
+# kingdom, honour and homage for the live context of protocol v2.
+READ_VANILLA_GLOBALS = {b"g_talk_troop", b"players_kingdom", b"player_honor", b"player_has_homage"}
 
 Op = tuple[int, list[int]]
 
@@ -211,6 +255,17 @@ def quick_strings(data: bytes) -> list[bytes]:
     return lines[1 : 1 + count]
 
 
+def dialog_line(line: bytes) -> tuple[list[bytes], list[Op], bytes, int, list[Op], bytes]:
+    """A conversation.txt line: header (id, speaker, input state), conditions, text, output
+    state, consequences, voice-over."""
+    tokens = line.split()
+    conditions, i = parse_block(tokens, 3)
+    text, output = tokens[i], int(tokens[i + 1])
+    consequences, j = parse_block(tokens, i + 2)
+    assert j == len(tokens) - 1, line
+    return tokens[:3], conditions, text, output, consequences, tokens[j]
+
+
 def names(data: bytes) -> list[bytes]:
     return data.split()
 
@@ -269,6 +324,17 @@ def mod_code(mod: dict[str, bytes]) -> Iterator[tuple[str, list[Op]]]:
             conditions, _, consequences, _, _ = menu_option(tokens, tokens.index(MENU_OPTION))
             yield "menu option conditions", conditions
             yield "menu option consequences", consequences
+    for line in new_dialog_lines(mod):
+        header, conditions, _, _, consequences, _ = dialog_line(line)
+        yield f"dialog {header[0].decode()} conditions", conditions
+        yield f"dialog {header[0].decode()} consequences", consequences
+
+
+def new_dialog_lines(mod: dict[str, bytes]) -> list[bytes]:
+    """The dialog lines appended after the vanilla ones."""
+    vanilla = int(golden("conversation.txt").split(b"\n")[1])
+    lines = mod["conversation.txt"].split(b"\n")
+    return lines[2 + vanilla : 2 + vanilla + len(NEW_DIALOGS)]
 
 
 def script_index(mod: dict[str, bytes], name: bytes) -> int:
@@ -325,7 +391,13 @@ def test_variable_use_counts(mod: dict[str, bytes]) -> None:
     seeded = set(variables) - set(names((SOURCE / "variables.txt").read_bytes()))
     assert seeded
     expected = [int(n) + (variables[i] in seeded) for i, n in enumerate(old)]
-    assert [int(n) for n in new[: len(old)]] == expected
+    actual = [int(n) for n in new[: len(old)]]
+    # The vanilla globals the mod reads gain uses; no other count changes.
+    for i, name in enumerate(variables):
+        if name in READ_VANILLA_GLOBALS:
+            assert actual[i] > expected[i], name
+            actual[i] = expected[i]
+    assert actual == expected
     assert len(new) == len(old) + len(NEW_VARIABLES)
     assert all(int(n) > 0 for n in new[len(old) :])
 
@@ -376,7 +448,11 @@ def test_camp_menu_gets_one_option_that_opens_the_presentation(
     tokens = b_lines[k].split()
     at = tokens.index(MENU_OPTION)
     conditions, text, consequences, door, end = menu_option(tokens, at)
-    opens = [(header_operations()["start_presentation"], [prsnt])]
+    by_name = header_operations()
+    talk_troop = (TAG_VARIABLE << OP_NUM_VALUE_BITS) | names(mod["variables.txt"]).index(
+        b"cai_talk_troop"
+    )
+    opens = [(by_name["assign"], [talk_troop, 0]), (by_name["start_presentation"], [prsnt])]
     assert (conditions, text, consequences, door) == ([], b"Talk_with_Hrodvar.", opens, b".")
     assert tokens[end] == b"mno_resume_travelling"
     # The option line minus the new option, and the menu line with one option fewer, are vanilla.
@@ -399,15 +475,27 @@ def test_mod_code_uses_only_whitelisted_operations(mod: dict[str, bytes]) -> Non
     variables = names(mod["variables.txt"])
     own_scripts = {script_index(mod, name) for name in NEW_SCRIPTS}
     own_presentation = presentation_index(mod, NEW_PRESENTATION)
+    writes_first = {by_name[name] for name in WRITES_FIRST_OPERAND}
+    assert writes_first <= allowed
     blocks = list(mod_code(mod))
-    assert len(blocks) == 3 + 3 + 2
+    assert len(blocks) == len(NEW_SCRIPTS) + 1 + 3 + 2 + 2 * len(NEW_DIALOGS)
+    read_globals = set()
     for where, ops in blocks:
         for opcode, args in ops:
             base = opcode & ~OPCODE_FLAGS
             assert base in allowed, (where, opcode)
-            for arg in args:
-                if tag(arg) == TAG_VARIABLE:
-                    assert variables[index(arg)].startswith(b"cai_"), (where, opcode)
+            for k, arg in enumerate(args):
+                if tag(arg) != TAG_VARIABLE:
+                    continue
+                name = variables[index(arg)]
+                if k == 0 and base in writes_first:
+                    assert name.startswith(b"cai_"), (where, opcode, name)
+                elif not name.startswith(b"cai_"):
+                    read_globals.add(name)
+    assert read_globals == READ_VANILLA_GLOBALS
+    for where, ops in blocks:
+        for opcode, args in ops:
+            base = opcode & ~OPCODE_FLAGS
             if base == by_name["call_script"]:
                 assert tag(args[0]) == TAG_SCRIPT and index(args[0]) in own_scripts, where
             if base == by_name["start_presentation"]:
@@ -428,7 +516,7 @@ def test_send_message_to_url_only_in_cai_tx_send(mod: dict[str, bytes]) -> None:
         for opcode, _ in ops
         if opcode & ~OPCODE_FLAGS == SEND_MESSAGE_TO_URL
     ]
-    assert sends == [b"cai_tx_send"] * 3
+    assert sends == [b"cai_tx_send"] * 4
     # Every other compiled file is vanilla (checked above) and vanilla never sends:
     for path in sorted(SOURCE.glob("module_*.py")):
         code = [ln.split("#")[0] for ln in path.read_text(encoding="cp1254").splitlines()]
@@ -436,7 +524,7 @@ def test_send_message_to_url_only_in_cai_tx_send(mod: dict[str, bytes]) -> None:
     for path in sorted(OVERLAY.glob("module_*.py")):
         code = [ln.split("#")[0] for ln in path.read_text(encoding="cp1254").splitlines()]
         count = sum("send_message_to_url" in ln for ln in code)
-        assert count == (3 if path.name == "module_scripts.py" else 0), path.name
+        assert count == (4 if path.name == "module_scripts.py" else 0), path.name
 
 
 def test_reply_delivery_is_guarded_by_request_id(mod: dict[str, bytes]) -> None:
@@ -472,24 +560,27 @@ def overlay_templates() -> list[str]:
 def test_url_templates_follow_the_protocol(mod: dict[str, bytes]) -> None:
     templates = overlay_templates()
     doc = PROTOCOL_DOC.read_text(encoding="utf-8")
-    expected = re.findall(r"^(/v1/\S+)$", doc, re.M)
-    assert len(templates) == len(expected) == 3
+    expected = re.findall(r"^(/v[12]/\S+)$", doc, re.M)
+    assert len(templates) == len(expected) == 4
     registers: dict[str, str] = {}
     for template, pattern in zip(templates, expected, strict=True):
-        prefix, _, path = template.partition("/v1/")
-        assert prefix == "http://127.0.0.1:8766"
+        prefix, _, path = template.partition("/v")
+        path = path[2:]
+        route = template[len(prefix) : len(prefix) + 4]
+        assert prefix == "http://127.0.0.1:8766" and route in ("/v1/", "/v2/")
         assert not set(template) & {"_", " ", "^"}
         # The doc's {regA}.. placeholders stand for one fixed register each.
         for placeholder, register in zip(
             re.findall(r"\{reg[A-Z]\}", pattern),
-            re.findall(r"\{reg\d+\}", "/v1/" + path),
+            re.findall(r"\{reg\d+\}", route + path),
             strict=True,
         ):
             assert registers.setdefault(placeholder, register) == register
         concrete = re.sub(r"\{reg[A-Z]\}", lambda m: registers[m[0]], pattern)
-        assert "/v1/" + path == concrete
+        assert route + path == concrete
         params = path.partition("?")[2].split("&")
-        assert params[0] == f"v={mirrored_constants()['PROTOCOL_VERSION']}"
+        version = "PROTOCOL_VERSION" if route == "/v1/" else "PROTOCOL_V2"
+        assert params[0] == f"v={mirrored_constants()[version]}"
         assert params[1].startswith("rid={reg") and params[-1] == "end=1"
         first_text = next((i for i, p in enumerate(params) if "{s" in p), len(params) - 1)
         assert all("{reg" not in p for p in params[first_text:])
@@ -554,7 +645,8 @@ def strip_mod_blocks(lines: list[str]) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "name", ["module_game_menus.py", "module_presentations.py", "module_scripts.py"]
+    "name",
+    ["module_dialogs.py", "module_game_menus.py", "module_presentations.py", "module_scripts.py"],
 )
 def test_overlay_sources_are_vanilla_outside_the_mod_blocks(name: str) -> None:
     base = (SOURCE / name).read_text(encoding="cp1254").splitlines()
@@ -581,3 +673,49 @@ def test_overlay_id_files_only_append(name: str, prefix: str, new: list[bytes]) 
     ids = [i for i, line in enumerate(base) if re.fullmatch(rf"{prefix}\w+ = \d+", line)]
     added = [f"{prefix}{n.decode()} = {len(ids) + k}" for k, n in enumerate(new)]
     assert mine == base[: ids[-1] + 1] + added + base[ids[-1] + 1 :]
+
+
+# --- tests: dialogs ---------------------------------------------------------------------
+
+
+def test_speak_freely_dialog_lines_are_appended(
+    mod: dict[str, bytes], qmap: dict[int, int]
+) -> None:
+    a_lines, b_lines = golden("conversation.txt").split(b"\n"), mod["conversation.txt"].split(b"\n")
+    vanilla = int(a_lines[1])
+    assert b_lines[0] == a_lines[0] and int(b_lines[1]) == vanilla + len(NEW_DIALOGS)
+    for x, y in zip(a_lines[2 : 2 + vanilla], b_lines[2 : 2 + vanilla], strict=True):
+        assert same_but_renumbered(x, y, qmap)
+    assert b_lines[2 + vanilla + len(NEW_DIALOGS) :] == a_lines[2 + vanilla :]
+    # The states already exist, so dialog_states.txt is unchanged (test_untouched_files...).
+    states = golden("dialog_states.txt").split()
+    by_name = header_operations()
+    prsnt = (TAG_PRESENTATION << OP_NUM_VALUE_BITS) | presentation_index(mod, NEW_PRESENTATION)
+    variables = names(mod["variables.txt"])
+    var = lambda n: (TAG_VARIABLE << OP_NUM_VALUE_BITS) | variables.index(n)  # noqa: E731
+    lines = new_dialog_lines(mod)
+    assert len(lines) == len(NEW_DIALOGS)
+    for line, (state_in, state_out) in zip(lines, NEW_DIALOGS, strict=True):
+        header, conditions, text, output, consequences, voice = dialog_line(line)
+        # Unsuffixed ids: no vanilla line shares them, so no vanilla id was renumbered.
+        assert header[0] == b"dlga_" + state_in + b":" + state_out
+        assert int(header[1]) & 0x10000  # plyr
+        assert states[int(header[2])] == state_in and states[output] == state_out
+        assert text == b"Speak_freely." and voice == b"NO_VOICEOVER"
+        assert conditions == [(by_name["troop_is_hero"], [var(b"g_talk_troop")])]
+        assert consequences == [
+            (by_name["assign"], [var(b"cai_talk_troop"), var(b"g_talk_troop")]),
+            (by_name["start_presentation"], [prsnt]),
+        ]
+    ids = [line.split()[0] for line in a_lines[2 : 2 + vanilla]]
+    assert all(dialog_id not in ids for dialog_id, *_ in (dialog_line(ln)[0] for ln in lines))
+
+
+def test_server_embeds_the_id_files_the_mod_uses() -> None:
+    """calradia-server compiles in game/module_system's ID_troops, ID_factions and ID_parties
+    (src/ids.rs) to map the indices the game sends to stable identifiers."""
+    for name in ["ID_troops.py", "ID_factions.py", "ID_parties.py"]:
+        assert not (OVERLAY / name).exists(), name
+    ids_rs = (REPO / "calradia-server" / "src" / "ids.rs").read_text()
+    embedded = re.findall(r'include_str!\("\.\./\.\./game/module_system/(ID_\w+\.py)"\)', ids_rs)
+    assert embedded == ["ID_troops.py", "ID_factions.py", "ID_parties.py"]

@@ -1,0 +1,15 @@
+id = "trp_npc2"
+name = "Marnid"
+
+[canon]
+background = """A merchant, son and grandson of merchants, born over the mountains. He left Geroia with a caravan of spices and a chest of denars bound for Sargoth, planning to buy linen, furs, velvet, iron and wool. Khergit raiders took most of the goods and horses, and two days later his own guards ran off with the rest. Sold his boots and peddled goods town to town. Admits he is no warrior by trade but can ride and knows trade and prices. Keeps trading contacts in Sargoth."""
+personality = "Polite, decent and unlucky; values peaceful commerce and dislikes lords who live on rent and pillage."
+motivations = ["Rebuild his fortune and restart trading", "A ruler who checks rapacious nobles and their tariffs"]
+speaking_style = "Courteous and a little apologetic. Addresses the player as 'sir' or 'madam'; 'I hope you don't mind my saying so', 'if you like'. Explains with merchant's examples (grain glut in Praven, hunger in Sargoth)."
+relationships = ["Borcha: a rogue, but trusts him in a fight; keeps a hand on his purse", "Baheshtur: resents his gloating over looted caravans", "Alayen: told him 'step aside, merchant, this is knight's work'", "Matheld: fears her sword-to-sword justice will fall on caravans"]
+tendencies = ["Objects to attacking or robbing villagers, rounding up serfs, cold-blooded murder", "Unhappy when the party breaks its word or squanders money held in trust", "Good with one-handed weapons, poor with throwing"]
+sources = ["module_strings.py: npc2_intro, npc2_backstory_b/c, npc2_backstory_later, npc2_signup(_2), npc2_home_recap, npc2_home_description(_2), npc2_intel_mission, npc2_kingsupport_2, npc2_kingsupport_objection, npc2_personalityclash(2)_speech(_b), npc2_personalitymatch_speech(_b), npc2_morality_speech, npc2_2ary_morality_speech, npc2_retirement_speech, npc2_rehire_speech, npc2_honorific, npc2_1", "module_scripts.py initialize_npcs: morality humanitarian, 2ary honest, clash npc5/npc9, match npc1, home p_town_1, contacts p_town_1, lrep_custodian", "module_strings.py: loot_village, steal_from_villagers, round_up_serfs, murder_merchant, fail_quest, squander_money"]
+
+[mod]
+personality = "Wry and self-deprecating about his bad luck; half-believes he is cursed on the road."
+tendencies = ["Quotes prices and estimates profits of anything mentioned", "Tries to talk the player out of needless violence with practical arguments", "Scrupulous with money, even small sums"]

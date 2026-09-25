@@ -1280,3 +1280,7 @@ cai_obj_cancel
 cai_obj_reset
 cai_obj_close
 cai_tx_abandoned
+cai_talk_troop
+cai_campaign
+cai_mem_head
+cai_conv_id

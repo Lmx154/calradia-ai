@@ -159,3 +159,133 @@ was restored on 2026-09-25 after reviewing the initial amendment in `bef22d8`.
   - s67 carries the reply from the callback to the presentation, together with the
     `$cai_reply_new` flag.
   - s65 is scratch for pname, set right before sending.
+
+## Protocol v2: characters, live context and memory (Milestone 3)
+
+v2 is additive. It adds one route, `/v2/talk`, used when the player picks **Speak freely.**
+in a conversation with a lord or companion. `/v1/talk` (Hrodvar), `/v1/result` and
+`/v1/cancel` are unchanged, and `/v1/result` and `/v1/cancel` serve jobs of both talk
+versions. The response frame, the job states, the limits, the game state machine and the
+callback are the same as in v1. A v1 client keeps working against a v2 server.
+
+### Request URL
+
+```
+/v2/talk?v=2&rid={regA}&job={regB}&camp={regE}&conv={regF}&head={regG}&troop={regH}&day={regD}&fac={regI}&pfac={regJ}&frel={regK}&rel={regL}&rep={regM}&occ={regN}&st={regO}&ren={regP}&hon={regQ}&loc={regR}&ldist={regS}&pg={regT}&pname={s65}&nname={s50}&fname={s51}&pfname={s52}&lname={s53}&msg={s66}&end=1
+```
+
+The template rules of v1 apply. `script_cai_store_context` fills reg44..reg59 and
+s50..s53 right before the send. Every value is read from the game at that moment:
+
+| Field | Game source | Server rule |
+|---|---|---|
+| `v` | | must equal 2 (`/v2/talk` with `v=1`, or `/v1/*` with `v=2`, is `bad_version`) |
+| `camp` | `$cai_campaign` | 1..=999999999 |
+| `conv` | `$cai_conv_id`, drawn at the first Say of each talk window | 1..=999999999 |
+| `head` | `$cai_mem_head`: job id of the last reply shown in this save, 0 if none | 0..=999999999 |
+| `troop` | `$cai_talk_troop` (`$g_talk_troop` when the option was picked) | index into `ID_troops.py`; must be a companion, king, lord, pretender or lady |
+| `day` | `store_current_day` | 0..=100000 |
+| `fac` | `store_troop_faction` of the NPC | index into `ID_factions.py` |
+| `pfac` | `$players_kingdom` (0 = none) | index into `ID_factions.py` |
+| `frel` | `store_relation` of `fac` and `fac_player_faction` (< 0 = hostile) | signed |
+| `rel` | NPC's `slot_troop_player_relation` (-100..100) | signed |
+| `rep` | NPC's `slot_lord_reputation_type` (lrep_*) | unsigned |
+| `occ` | NPC's `slot_troop_occupation` (slto_*) | unsigned |
+| `st` | status bits, below | unsigned |
+| `ren` | player's `slot_troop_renown` | signed |
+| `hon` | `$player_honor` | signed |
+| `loc` | the town, castle or village nearest to `p_main_party` (0 = none) | index into `ID_parties.py` |
+| `ldist` | `store_distance_to_party_from_party` to it (map units) | unsigned |
+| `pg` | `troop_get_type` of the player (1 = female) | 0 or 1 |
+| `pname`, `nname`, `fname`, `pfname`, `lname` | names of the player, NPC, NPC's faction, player's faction (empty if none), location | sanitized; `pname` cut to 32, the others to 40 characters |
+| `msg` | the player's message | as in v1 |
+
+Signed values arrive as `-N` (`%2DN` on the wire). Every integer must lie within
+±`MAX_STAT` (1000000); anything missing or out of range is `bad_param`.
+
+Status bits (`st`), mirrored in `module_scripts.py` as `CAI_ST_*`:
+
+| Bit | Meaning |
+|---|---|
+| 1 `ST_IN_PARTY` | the NPC is in the player's party (`main_party_has_troop`) |
+| 2 `ST_PLAYER_PRISONER` | the NPC is held by the player's party |
+| 4 `ST_OTHER_PRISONER` | the NPC is held by another party |
+| 8 `ST_FACTION_LEADER` | the NPC leads its faction |
+| 16 `ST_MARSHAL` | the NPC is its faction's marshal |
+| 32 `ST_SPOUSE` | the NPC is the player's spouse |
+| 64 `ST_BETROTHED` | the NPC is betrothed to the player |
+| 128 `ST_PLAYER_VASSAL` | the player has a kingdom and `$player_has_homage` = 1 |
+| 256 `ST_PLAYER_RULER` | `$players_kingdom` is the player's own active kingdom and the player leads it |
+
+The v2 URL is about 330 bytes plus the encoded names and message, well under
+`MAX_TARGET`. The campaign state itself stays in the game; only these values travel.
+
+### Jobs
+
+- **Idempotency (in memory):** as in v1, keyed by job id. Two v2 talks are the same talk
+  when every field above is equal.
+- **Supersede:** a new v2 talk cancels the PENDING job of the same character in the same
+  campaign.
+- **Durable idempotency:** before generating, the worker looks up (camp, job) in the memory
+  database. If it is stored with the same parameters, the stored reply is the answer, with
+  no new generation and no new record (a retried talk after a server restart). If it is
+  stored with other parameters, the job fails with `conflict`.
+- **New FAILED reasons:** `memory_unavailable` (the database could not be opened, checked or
+  migrated; see `--memory-db`), `memory_error` (a query failed), `conflict` (above).
+
+## Memory
+
+The server keeps conversation memory in SQLite (`calradia-server/src/memory.rs`; default
+`$XDG_DATA_HOME/calradia-ai/memory.sqlite3`, or `~/.local/share/...`). Tables:
+`campaigns`, `conversations` (one per talk window, keyed by (camp, conv)) and `turns`
+(one player message and the NPC's reply, keyed by (camp, job)). Every write happens in one
+transaction; the stored reply is exactly the text the game is sent.
+
+### The memory chain
+
+Each turn stores the `head` that its talk carried as `parent_job`. The game sets
+`$cai_mem_head` to a job id **only after it has shown that reply** in the talk window, and
+the variable is saved with the game. So the turns reachable from a head through
+`parent_job` are exactly the replies the player saw in the history of that savegame, and
+nothing else:
+
+- **Save branches.** Reloading an older save sends an older head. Replies from the
+  abandoned branch are not on the chain and are never recalled, even though they stay in
+  the database. Nothing has to detect the reload.
+- **Campaigns.** A new campaign starts with `$cai_campaign` = 0 and `$cai_mem_head` = 0.
+  The campaign id is drawn at the first message and saved with the game. A new campaign
+  has an empty chain, and turns are looked up by (camp, job), so campaigns cannot share
+  memories even if two of them drew the same id.
+- **Unknown head.** If the head is not stored (a deleted or different database), the server
+  logs a warning and the NPC talks without memories. Nothing is mixed in.
+
+### Commit and delivery policy
+
+1. A successful, non-empty reply is stored **before** the job becomes READY, so the game
+   can never show a reply that memory lacks. If storing fails, the job FAILS with
+   `memory_error` and nothing is shown.
+2. Failed, timed-out, empty and canceled generations are never stored. A reply that
+   arrives after its job was canceled, superseded or timed out is not stored either.
+3. A stored reply is **generated**, not read. It enters memory only when the player has
+   seen it: the game shows it, makes it the head, and the next talk carries that head
+   (`delivered_at` is set then). A reply that was stored but never shown (the player
+   canceled or closed the window before the poll returned it, or the server restarted
+   before the poll) is never recalled.
+4. A reply shown but not saved (the player quits without saving) is forgotten on reload,
+   because the saved head is older. This matches what the reloaded save experienced.
+
+### Recall
+
+For each v2 talk the worker recalls, from the character's turns on the chain (at most
+`MAX_CHAIN` = 5000 turns are followed):
+
+- the conversation in progress: its last 8 turns, as chat messages;
+- the last 4 turns of earlier conversations;
+- up to 3 older turns sharing the most keywords (words of 4+ letters, minus common ones)
+  with the player's message, newer first among equals;
+- when the character first spoke with the player, and how many times.
+
+Selection is deterministic. There are no embeddings or summaries, and records are never
+rewritten. The prompt (profile, live state, memories, rules and chat) is kept under
+12000 characters by dropping relevant memories, then recent ones, then the oldest turns
+of the conversation in progress.

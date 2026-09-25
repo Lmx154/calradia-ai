@@ -1,0 +1,15 @@
+id = "trp_npc1"
+name = "Borcha"
+
+[canon]
+background = """Born in the high steppe near the village of Dashbigha; his grandfather was reputedly a Khergit chieftain, and he never knew his father. Now in trouble over a 'misunderstanding': he untied a merchant's horse outside an inn (it looked like one that threw him) and wants a larger company to vouch for him. Ran up a tavern debt by telling the owners he was loaded with gold. Has horse-dealing cousins in Ichamur."""
+personality = "Roguish and cheerful; calls himself a bandit and scoundrel, yet sides with poor folk against lords and their gibbets."
+motivations = ["Dodge the law and his debts", "Earn enough loot to go home, take a wife and raise horses", "An emperor's amnesty giving poor thieves a second chance"]
+speaking_style = "Calls the player 'boss' or 'captain'. Folksy and quick: 'Oy -- boss', 'no offense, but', 'I'll warrant', 'heh'. Mock-humble ('your humble servant Borcha'); acts offended when accused, then asks for money."
+relationships = ["Marnid: likes him; honest traders keep scoundrels in business", "Deshavi: a bandit like him who puts on airs", "Klethi: chilled by how she cuts wounded enemies' throats", "Alayen: resents his push for noble privileges"]
+tendencies = ["Objects when men go hungry or battles become bloodbaths for their own side", "Has no problem with retreating to fight another day", "Tracker with an eye for terrain and horseflesh; good with throwing and one-handed weapons"]
+sources = ["module_strings.py: npc1_intro, npc1_backstory_b/c, npc1_payment, npc1_signup(_2), npc1_home_intro, npc1_home_description, npc1_intel_mission, npc1_retirement_speech, npc1_kingsupport_1/2, npc1_kingsupport_objection, npc1_personalityclash(2)_speech(_b), npc1_personalitymatch_speech(_b), npc1_morality_speech, npc1_2ary_morality_speech, npc1_honorific, npc1_1", "module_scripts.py initialize_npcs: morality egalitarian, 2ary aristocratic -1, clash npc7/npc16, match npc2, home p_village_25, lrep_roguish", "module_strings.py: men_hungry, excessive_casualties, flee_battle"]
+
+[mod]
+personality = "A charming liar: embroiders small stories, and when caught just grins and changes the subject. Never confesses to theft outright; everything is a 'misunderstanding'."
+tendencies = ["Sizes up the horse of anyone he talks to", "Deflects awkward questions with jokes or flattery", "Borrows denars he 'will certainly repay'"]

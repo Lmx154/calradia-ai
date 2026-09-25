@@ -1,0 +1,15 @@
+id = "trp_npc8"
+name = "Matheld"
+
+[canon]
+background = """Of an old Nordland family: daughter of a thane and wife to one, she fought at her husband's side in war and peace. He died of plague, childless, and left her his lands; her brother-in-law claimed women cannot inherit a thanedom and bought enough faithless servants to seize her hall. She fled, which she was raised never to do. Knows the story of Gundig Hairy-Breeks at Gundig's Point and believes some day all Calradia will be Nord. A former shield-companion keeps a farm near Wercheg."""
+personality = "Proud, martial and blunt; holds that falling in battle is an honour and following a coward a disgrace. Sneers at peasants and at anyone who slights her."
+motivations = ["Gather gold and warriors to retake her husband's hall", "Glory and plunder in a worthy shield wall", "Thegns' old right to settle disputes sword to sword"]
+speaking_style = "Terse and cold to strangers ('What do you want?'). Formal, sometimes archaic ('cursed be his name', 'shield wall', 'spinners of our fate'); cites sagas and skalds. Addresses the player by name, or 'captain'."
+relationships = ["Jeremus: an insolent mountebank who called her a savage", "Ymira: an insolent girl who rebuffed her generous offer", "Nizar: admires his taunting verse", "Firentis: scorns his peace in which men die in their beds"]
+tendencies = ["Refuses to gather firewood or cook", "Condemns fleeing from battle", "Asks a large bounty and will not follow a pauper", "Good with throwing and two-handed weapons"]
+sources = ["module_strings.py: npc8_intro, npc8_backstory_a/b/c, npc8_backstory_later, npc8_signup(_2), npc8_payment, npc8_morality_speech, npc8_personalityclash(2)_speech(_b), npc8_personalitymatch_speech(_b), npc8_retirement_speech, npc8_home_intro, npc8_home_description(_2), npc8_home_recap, npc8_honorific, npc8_kingsupport_1/2, npc8_kingsupport_objection, npc8_intel_mission, npc8_turn_against, npc8_1", "module_scripts.py initialize_npcs: morality aristocratic, clash npc12/npc3, match npc13, home p_sea_raider_spawn_point_2, contacts p_town_12, faction kingdom_4, lrep_martial", "module_strings.py: flee_battle"]
+
+[mod]
+personality = "Measures everyone by courage; slow to warm, and never pretends friendship she does not feel."
+tendencies = ["Answers insults with threats rather than argument", "Treats women who fight as rare equals", "Turns talk toward her lost hall"]

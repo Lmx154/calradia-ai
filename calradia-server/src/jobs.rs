@@ -6,15 +6,15 @@
 //! during I/O: an upstream socket that must be aborted is taken out of the state under the
 //! lock and shut down after the guard is dropped.
 
-use crate::npc::Npc;
 use crate::protocol::{
-    TalkParams, CODE_BAD_REQUEST, CODE_BUSY, CODE_CANCELED, CODE_FAILED, CODE_PENDING, CODE_READY,
+    Talk, CODE_BAD_REQUEST, CODE_BUSY, CODE_CANCELED, CODE_FAILED, CODE_PENDING, CODE_READY,
     CODE_UNKNOWN_JOB, JOB_DEADLINE_SECS, JOB_TTL_SECS, MAX_JOBS, QUEUE_LEN, REASON_BUSY,
     REASON_CANCELED, REASON_CONFLICT, REASON_PENDING, REASON_SUPERSEDED, REASON_TIMEOUT,
     REASON_UNKNOWN_JOB,
 };
+use crate::runner::Runner;
 use crate::sanitize::sanitize_text;
-use crate::upstream::{Backend, Failure};
+use crate::upstream::Failure;
 use crate::{log, preview};
 use std::collections::{HashMap, VecDeque};
 use std::io;
@@ -57,10 +57,7 @@ enum State {
 }
 
 struct Job {
-    npc: &'static Npc,
-    day: u32,
-    pname: String,
-    msg: String,
+    talk: Talk,
     state: State,
     created: Instant,
     deadline: Instant,
@@ -73,8 +70,14 @@ impl Job {
         matches!(self.state, State::Pending)
     }
 
-    fn same_talk(&self, t: &TalkParams) -> bool {
-        self.npc.id == t.npc.id && self.day == t.day && self.pname == t.pname && self.msg == t.msg
+    fn same_talk(&self, t: &Talk) -> bool {
+        match (&self.talk, t) {
+            (Talk::V1(a), Talk::V1(b)) => {
+                a.npc.id == b.npc.id && a.day == b.day && a.pname == b.pname && a.msg == b.msg
+            }
+            (Talk::V2(a), Talk::V2(b)) => a == b,
+            _ => false,
+        }
     }
 
     fn answer(&self) -> Answer {
@@ -109,11 +112,33 @@ impl Answer {
 /// Everything the worker needs to run one job, copied out of the store.
 pub struct WorkItem {
     pub id: u32,
-    pub npc: &'static Npc,
-    pub day: u32,
-    pub pname: String,
-    pub msg: String,
+    pub talk: Talk,
     pub deadline: Instant,
+}
+
+/// Who a talk is addressed to: a new talk supersedes the PENDING jobs of the same speaker.
+/// For v2 that is the character within the campaign.
+fn speaker(talk: &Talk) -> (u32, u32, u32) {
+    match talk {
+        Talk::V1(t) => (1, t.npc.id, 0),
+        Talk::V2(t) => (2, t.campaign, t.troop),
+    }
+}
+
+/// A short description of a talk for the log.
+fn describe(talk: &Talk) -> String {
+    match talk {
+        Talk::V1(t) => format!("npc={} day={} msg={:?}", t.npc.id, t.day, preview(&t.msg)),
+        Talk::V2(t) => format!(
+            "v2 camp={} conv={} head={} {} day={} msg={:?}",
+            t.campaign,
+            t.conversation,
+            t.head,
+            t.character,
+            t.context.day,
+            preview(&t.msg)
+        ),
+    }
 }
 
 struct Running {
@@ -155,7 +180,7 @@ impl Store {
 
     /// `/v1/talk`: returns the state of an existing job with the same parameters, rejects
     /// the same id with other parameters, or queues a new job.
-    pub fn talk(&self, id: u32, talk: TalkParams) -> Answer {
+    pub fn talk(&self, id: u32, talk: Talk) -> Answer {
         let now = Instant::now();
         let mut guard = self.lock();
         let inner = &mut *guard;
@@ -177,7 +202,7 @@ impl Store {
         &self,
         inner: &mut Inner,
         id: u32,
-        talk: TalkParams,
+        talk: Talk,
         now: Instant,
         kill: &mut Vec<TcpStream>,
     ) -> Answer {
@@ -187,7 +212,7 @@ impl Store {
         let victims: Vec<u32> = inner
             .jobs
             .iter()
-            .filter(|(_, j)| j.npc.id == talk.npc.id && j.is_pending())
+            .filter(|(_, j)| speaker(&j.talk) == speaker(&talk) && j.is_pending())
             .map(|(v, _)| *v)
             .collect();
         let waiting = inner.queue.iter().filter(|q| !victims.contains(q)).count();
@@ -225,20 +250,15 @@ impl Store {
             log(format!("job {old} evicted: store full"));
         }
         log(format!(
-            "job {id} queued npc={} day={} msg={:?} (queue {}, store {})",
-            talk.npc.id,
-            talk.day,
-            preview(&talk.msg),
+            "job {id} queued {} (queue {}, store {})",
+            describe(&talk),
             inner.queue.len() + 1,
             inner.jobs.len() + 1
         ));
         inner.jobs.insert(
             id,
             Job {
-                npc: talk.npc,
-                day: talk.day,
-                pname: talk.pname,
-                msg: talk.msg,
+                talk,
                 state: State::Pending,
                 created: now,
                 deadline: now + self.limits.deadline,
@@ -327,10 +347,7 @@ impl Store {
                 ));
                 let item = WorkItem {
                     id,
-                    npc: job.npc,
-                    day: job.day,
-                    pname: job.pname.clone(),
-                    msg: job.msg.clone(),
+                    talk: job.talk.clone(),
                     deadline: job.deadline,
                 };
                 inner.running = Some(Running { id, conn: None });
@@ -341,6 +358,11 @@ impl Store {
                 .wait(guard)
                 .unwrap_or_else(PoisonError::into_inner);
         }
+    }
+
+    /// Whether job `id` is still waiting for its outcome.
+    pub fn is_pending(&self, id: u32) -> bool {
+        self.lock().jobs.get(&id).is_some_and(Job::is_pending)
     }
 
     /// Worker: registers the connected upstream socket of the running job, so a cancel
@@ -446,13 +468,15 @@ fn shut_down(conns: Vec<TcpStream>) {
 }
 
 /// Starts the single worker thread: it runs queued jobs one at a time.
-pub fn spawn_worker(store: Arc<Store>, backend: Backend) -> io::Result<thread::JoinHandle<()>> {
+pub fn spawn_worker(store: Arc<Store>, runner: Runner) -> io::Result<thread::JoinHandle<()>> {
     thread::Builder::new()
         .name("worker".into())
         .spawn(move || loop {
             let item = store.next_job();
             let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
-                backend.generate(&item, &mut |conn| store.attach(item.id, conn))
+                runner.run(&item, &mut |conn| store.attach(item.id, conn), &|| {
+                    store.is_pending(item.id)
+                })
             }))
             .unwrap_or_else(|_| Err(Failure::error("worker panicked")));
             store.finish(item.id, outcome);

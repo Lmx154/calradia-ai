@@ -13624,11 +13624,14 @@ presentations = [
     ]),
     #INVASION MODE END
 
-  # --- Calradia AI (milestone 2): talk with Hrodvar; see docs/protocol-v1.md ---
+  # --- Calradia AI (milestone 2): talk with an NPC; see docs/protocol-v1.md ---
   # The conversation starts afresh on every load. Requests go through script_cai_tx_send;
   # replies arrive in script_game_receive_url_response, which hands them over in s67
   # together with $cai_reply_new. Overlays cannot be disabled, so a button that is not
   # available is drawn faded and its click is ignored.
+  # Milestone 3: $cai_talk_troop is the character spoken to ("Speak freely." in a dialog),
+  # or 0 for Hrodvar (camp menu). For a character, a reply becomes the savegame's memory
+  # head ($cai_mem_head) only when it is shown here; s59 holds the NPC's name each frame.
   ("cai_talk", prsntf_manual_end_only, mesh_load_window, [
     (ti_on_presentation_load,
      [(set_fixed_point_multiplier, 1000),
@@ -13639,12 +13642,14 @@ presentations = [
       (assign, "$cai_conv_state", CAI_CONV_IDLE),
       (assign, "$cai_conv_job", 0),
       (assign, "$cai_conv_start_ms", 0),
+      (assign, "$cai_conv_id", 0), # a new conversation id is drawn at the first Say
       (assign, "$cai_cancel_owed_job", 0),
       (assign, "$cai_reply_new", 0),
       (assign, "$cai_ui_warn", -1), # forces the first update of the warning line
       (str_clear, s66),
 
-      (create_text_overlay, reg1, "@Hrodvar", tf_center_justify),
+      (call_script, "script_cai_store_npc_name"),
+      (create_text_overlay, reg1, "@{s59}", tf_center_justify),
       (position_set_x, pos1, 500),
       (position_set_y, pos1, 680),
       (overlay_set_position, reg1, pos1),
@@ -13713,6 +13718,7 @@ presentations = [
     (ti_on_presentation_run,
      [(store_trigger_param_1, ":now"), # ms since load
       (assign, "$cai_now_ms", ":now"),
+      (call_script, "script_cai_store_npc_name"),
       (try_begin),
         (key_clicked, key_escape),
         (presentation_set_duration, 0),
@@ -13728,8 +13734,13 @@ presentations = [
         (str_store_string_reg, s61, s60),
         (try_begin),
           (eq, "$cai_conv_state", CAI_CONV_READY),
-          (str_store_string, s60, "@You: {s64}^Hrodvar: {s67}"),
-          (overlay_set_text, "$cai_obj_status", "@Hrodvar has answered."),
+          (str_store_string, s60, "@You: {s64}^{s59}: {s67}"),
+          (overlay_set_text, "$cai_obj_status", "@{s59} has answered."),
+          # The player has now seen this reply: it becomes the savegame's memory head.
+          (try_begin),
+            (gt, "$cai_talk_troop", 0),
+            (assign, "$cai_mem_head", "$cai_conv_job"),
+          (try_end),
         (else_try),
           (str_store_string, s60, "@You: {s64}^({s67})"),
           (overlay_set_text, "$cai_obj_status", s67),
@@ -13743,7 +13754,7 @@ presentations = [
         (store_sub, ":waited", ":now", "$cai_conv_start_ms"),
         (ge, ":waited", CAI_GIVE_UP_MS),
         (assign, "$cai_conv_state", CAI_CONV_FAILED),
-        (str_store_string, s67, "@Hrodvar does not answer."),
+        (str_store_string, s67, "@{s59} does not answer."),
         (assign, "$cai_reply_new", 1),
       (try_end),
 
@@ -13823,6 +13834,7 @@ presentations = [
 
     (ti_on_presentation_event_state_change,
      [(store_trigger_param_1, ":object"),
+      (call_script, "script_cai_store_npc_name"),
       (try_begin),
         (eq, ":object", "$cai_obj_text_box"),
         (str_store_string_reg, s66, s0),
@@ -13832,13 +13844,28 @@ presentations = [
           (eq, "$cai_tx_rid", 0),
           (neg|is_between, "$cai_conv_state", CAI_CONV_SUBMITTING, CAI_CONV_PENDING + 1),
           (neg|str_is_empty, s66),
+          # A character's memory is kept per campaign: the campaign id is drawn once, at the
+          # first message, and saved with the game. The time since load adds entropy.
+          (try_begin),
+            (gt, "$cai_talk_troop", 0),
+            (try_begin),
+              (eq, "$cai_campaign", 0),
+              (call_script, "script_cai_new_id", "$cai_now_ms", 0),
+              (assign, "$cai_campaign", reg0),
+            (try_end),
+            (try_begin),
+              (eq, "$cai_conv_id", 0),
+              (call_script, "script_cai_new_id", "$cai_now_ms", 0),
+              (assign, "$cai_conv_id", reg0),
+            (try_end),
+          (try_end),
           (call_script, "script_cai_new_id", "$cai_now_ms", "$cai_conv_job"),
           (assign, "$cai_conv_job", reg0),
           (assign, "$cai_conv_state", CAI_CONV_SUBMITTING),
           (assign, "$cai_conv_start_ms", "$cai_now_ms"),
           (str_store_string, s64, s66),
-          (overlay_set_text, "$cai_obj_reply", "@You: {s64}^Hrodvar is thinking...^^{s60}^^{s61}^^{s62}"),
-          (overlay_set_text, "$cai_obj_status", "@Waiting for Hrodvar..."),
+          (overlay_set_text, "$cai_obj_reply", "@You: {s64}^{s59} is thinking...^^{s60}^^{s61}^^{s62}"),
+          (overlay_set_text, "$cai_obj_status", "@Waiting for {s59}..."),
           (call_script, "script_cai_tx_send", CAI_OP_TALK, "$cai_conv_job"),
           (str_clear, s66),
           (overlay_set_text, "$cai_obj_text_box", "str_empty_string"),
@@ -13850,7 +13877,7 @@ presentations = [
           (is_between, "$cai_conv_state", CAI_CONV_SUBMITTING, CAI_CONV_PENDING + 1),
           (assign, "$cai_conv_state", CAI_CONV_CANCELED),
           (assign, "$cai_cancel_owed_job", "$cai_conv_job"),
-          (str_store_string, s67, "@You stopped waiting for Hrodvar."),
+          (str_store_string, s67, "@You stopped waiting for {s59}."),
           (assign, "$cai_reply_new", 1),
         (try_end),
       (else_try),

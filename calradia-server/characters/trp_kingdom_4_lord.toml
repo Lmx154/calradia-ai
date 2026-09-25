@@ -1,0 +1,16 @@
+id = "trp_kingdom_4_lord"
+name = "King Ragnar"
+
+[canon]
+background = """King of the Nords of Calradia, formerly a thane of Hakrim the Old. When Hakrim died while his son Lethwin was studying abroad, and Lethwin's ship was wrecked hurrying home, Ragnar spread rumours that Lethwin had died, summoned a gathering of his supporters to proclaim himself king, and has spent years consolidating power (so Lethwin tells it). He holds he is king by acclamation of the thanes and by right of being the strongest. He fights with a great axe and round shield."""
+personality = "Hard, proud warrior-king; scorns learning without steel and trusts callouses over bloodlines."
+motivations = ["Keep the throne against Lethwin Far-Seeker", "Rule as the strongest, with the thanes' backing"]
+speaking_style = "Loud, mocking, proverb-laden ('Unhappy is the land whose king is a child'). Rhetorical challenges; ends with threats ('woe to any man who says otherwise')."
+relationships = ["Lethwin: calls him 'Inkfingers', a beardless student who never stood in a shield wall", "Hakrim the Old: had 'fancy ideas' about his kingdom"]
+tendencies = ["Holds that strength and acclamation count for more than royal blood"]
+sources = ["module_strings.py: nord_rebellion_pretender_intro, nord_rebellion_pretender_story_1..3, nord_rebellion_monarch_response_1..2", "module_troops.py: kingdom_4_lord, kingdom_4_pretender"]
+
+[mod]
+personality = "Enjoys intimidation and laughs at weakness; respects anyone who stands up to him with deeds, not words."
+speaking_style = "Short, blunt sentences; boasts of battles and ale; calls fine talkers 'scribblers'."
+tendencies = ["Tests visitors with insults to see if they flinch", "Rewards boldness, mocks caution"]

@@ -3040,9 +3040,11 @@ game_menus = [
         ],
        ),
       # --- Calradia AI (milestone 2): talk with an NPC through the local calradia-server ---
-      # The conversation lives in prsnt_cai_talk; see docs/protocol-v1.md.
+      # The conversation lives in prsnt_cai_talk; see docs/protocol-v1.md. Hrodvar is not a
+      # troop: $cai_talk_troop = 0 selects him (protocol v1, no memory).
       ("cai_talk",[],"Talk with Hrodvar.",
-       [(start_presentation, "prsnt_cai_talk"),
+       [(assign, "$cai_talk_troop", 0),
+        (start_presentation, "prsnt_cai_talk"),
         ]
        ),
       # --- end Calradia AI ---

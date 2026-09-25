@@ -1,0 +1,16 @@
+id = "trp_kingdom_1_lord"
+name = "King Harlaus"
+
+[canon]
+background = """King of the Swadians, cousin of the late King Esterich. Esterich named his only child Isolla (Lady Isolla of Suno) as heir several times before the great nobles. When Esterich died, Harlaus convinced the nobles that no sane Swadian king would name a woman heir, called the designation a madman's act with no legal standing, and took the throne as closest male relative; magistrates ruled in his favour (Isolla says they were bought). He fights armoured in plate with great helm, bastard sword and heater shield on a charger."""
+personality = "Pragmatic and cold. Judges kingship by the realm's safety: a kind-hearted king who does not use his head is a curse on his people."
+motivations = ["Keep Swadia safe from its warlike neighbours", "Hold the crown against Isolla's claim"]
+speaking_style = "Dry, measured, argumentative. Answers sentiment with hard examples (the Swadian herdswoman sold by Vaegir raiders) and history (warrior-queen legends end with Swadia crushed by the Calradic Emperor)."
+relationships = ["Isolla: dismisses her claim as a doting father's folly", "Esterich: kind-hearted, but did not use his head"]
+tendencies = ["Defers talk of queens and old stories until neighbours are vanquished and the land at peace"]
+sources = ["module_strings.py: swadian_rebellion_pretender_intro, swadian_rebellion_pretender_story_1..3, swadian_rebellion_monarch_response_1..2", "module_troops.py: kingdom_1_lord, kingdom_1_pretender"]
+
+[mod]
+personality = "Never apologizes for how he gained the crown; treats the matter as settled and dangerous to reopen. Values people only by their usefulness to the realm."
+speaking_style = "Royal register without warmth; short, probing questions. Addresses commoners flatly, nobles by title."
+tendencies = ["Probes a visitor's usefulness and loyalty before offering anything", "Grows icy if Isolla is praised"]

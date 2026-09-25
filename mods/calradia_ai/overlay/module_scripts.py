@@ -27,6 +27,16 @@ CAI_CODE_BAD_REQUEST = 4
 CAI_CODE_UNKNOWN_JOB = 5
 CAI_CODE_BUSY = 6
 CAI_GAME_GIVE_UP_SECS = 120
+CAI_PROTOCOL_V2 = 2
+CAI_ST_IN_PARTY = 1
+CAI_ST_PLAYER_PRISONER = 2
+CAI_ST_OTHER_PRISONER = 4
+CAI_ST_FACTION_LEADER = 8
+CAI_ST_MARSHAL = 16
+CAI_ST_SPOUSE = 32
+CAI_ST_BETROTHED = 64
+CAI_ST_PLAYER_VASSAL = 128
+CAI_ST_PLAYER_RULER = 256
 
 # Game side only (module_presentations.py imports these too).
 CAI_NPC_HRODVAR = 1        # npc= sent with /v1/talk
@@ -9282,7 +9292,7 @@ scripts = [
       # A v1 frame "R|C|T|R" arrives as reg0 = R, reg1 = C, reg2 = R, s0 = T. A transport
       # failure arrives as an empty body: num_integers = 1, reg0 = 0, num_strings = 0
       # (docs/http-ipc.md). The registers are copied into locals first; s0 is copied into s67
-      # only when the frame is delivered. This script calls no other script.
+      # only when the frame is delivered, before any script is called.
       (store_script_param, ":num_integers", 1),
       (store_script_param, ":num_strings", 2),
       (assign, ":rid", reg0),
@@ -9334,7 +9344,7 @@ scripts = [
           (str_store_string_reg, s67, s0),
           (try_begin),
             (eq, ":code", CAI_CODE_READY),
-            # s67 is Hrodvar's reply.
+            # s67 is the NPC's reply.
             (assign, "$cai_conv_state", CAI_CONV_READY),
             (assign, "$cai_reply_new", 1),
           (else_try),
@@ -9343,9 +9353,10 @@ scripts = [
           (else_try),
             # Terminal: s67 becomes the player-facing reason (T is a reason token here).
             (assign, "$cai_conv_state", CAI_CONV_FAILED),
+            (call_script, "script_cai_store_npc_name"),
             (try_begin),
               (eq, ":code", CAI_CODE_FAILED),
-              (str_store_string, s67, "@Hrodvar could not answer ({s67})."),
+              (str_store_string, s67, "@{s59} could not answer ({s67})."),
             (else_try),
               (eq, ":code", CAI_CODE_CANCELED),
               (assign, "$cai_conv_state", CAI_CONV_CANCELED),
@@ -50937,10 +50948,12 @@ scripts = [
   # Sends nothing while a request is outstanding ($cai_tx_rid != 0): the engine collects
   # response bodies in one unlocked buffer, so at most one request may be in flight.
   # INPUT: arg1 = op (CAI_OP_TALK, CAI_OP_RESULT or CAI_OP_CANCEL), arg2 = job id
-  #        For CAI_OP_TALK, s66 holds the player's message.
+  #        For CAI_OP_TALK, s66 holds the player's message, and $cai_talk_troop selects
+  #        the talk: 0 = Hrodvar (/v1/talk), a troop = that character (/v2/talk).
   # The URL templates are the quick-string operands themselves, so that encode_url = 1
   # percent-encodes every substituted value. Registers: reg60 = rid, reg61 = job,
-  # reg62 = npc, reg63 = day; s65 = player name (scratch), s66 = message.
+  # reg62 = npc, reg63 = day; s65 = player name (scratch), s66 = message; for /v2/talk
+  # also reg44..reg59 and s50..s53 from script_cai_store_context.
   ("cai_tx_send",
     [
       (store_script_param, ":op", 1),
@@ -50957,18 +50970,139 @@ scripts = [
         (assign, "$cai_tx_inst", "$cai_prsnt_inst"),
         (assign, reg60, "$cai_tx_rid"),
         (assign, reg61, ":job"),
+        (store_current_day, reg63),
+        (str_store_troop_name, s65, "trp_player"),
         (try_begin),
           (eq, ":op", CAI_OP_TALK),
+          (eq, "$cai_talk_troop", 0),
           (assign, reg62, CAI_NPC_HRODVAR),
-          (store_current_day, reg63),
-          (str_store_troop_name, s65, "trp_player"),
           (send_message_to_url, "@http://127.0.0.1:8766/v1/talk?v=1&rid={reg60}&job={reg61}&npc={reg62}&day={reg63}&pname={s65}&msg={s66}&end=1", 1),
         (else_try),
           (eq, ":op", CAI_OP_RESULT),
           (send_message_to_url, "@http://127.0.0.1:8766/v1/result?v=1&rid={reg60}&job={reg61}&end=1", 1),
         (else_try),
+          (eq, ":op", CAI_OP_CANCEL),
           (send_message_to_url, "@http://127.0.0.1:8766/v1/cancel?v=1&rid={reg60}&job={reg61}&end=1", 1),
+        (else_try),
+          # CAI_OP_TALK with a character.
+          (call_script, "script_cai_store_context", "$cai_talk_troop"),
+          (send_message_to_url, "@http://127.0.0.1:8766/v2/talk?v=2&rid={reg60}&job={reg61}&camp={reg44}&conv={reg45}&head={reg46}&troop={reg47}&day={reg63}&fac={reg48}&pfac={reg49}&frel={reg50}&rel={reg51}&rep={reg52}&occ={reg53}&st={reg54}&ren={reg55}&hon={reg56}&loc={reg57}&ldist={reg58}&pg={reg59}&pname={s65}&nname={s50}&fname={s51}&pfname={s52}&lname={s53}&msg={s66}&end=1", 1),
         (try_end),
+      (try_end),
+    ]),
+  # --- end Calradia AI ---
+  # --- Calradia AI (milestone 3): character conversations; see docs/protocol-v1.md, "Protocol v2" ---
+
+
+  # script_cai_store_npc_name: s59 = the name of the NPC in the talk window ($cai_talk_troop,
+  # or Hrodvar when it is 0).
+  ("cai_store_npc_name",
+    [
+      (try_begin),
+        (gt, "$cai_talk_troop", 0),
+        (str_store_troop_name, s59, "$cai_talk_troop"),
+      (else_try),
+        (str_store_string, s59, "@Hrodvar"),
+      (try_end),
+    ]),
+
+  # script_cai_store_context: reads the live game state that /v2/talk carries. It only reads
+  # game state. INPUT: arg1 = the NPC's troop.
+  # OUTPUT: reg44 camp, reg45 conv, reg46 head, reg47 troop, reg48 NPC faction, reg49 player
+  # faction ($players_kingdom), reg50 relation of the NPC's faction with fac_player_faction,
+  # reg51 NPC's relation with the player, reg52 reputation type, reg53 occupation, reg54
+  # status bits (CAI_ST_*), reg55 player renown, reg56 player honour, reg57 nearest
+  # settlement (0 if none), reg58 its map distance, reg59 player troop type (1 = female);
+  # s50 NPC name, s51 NPC faction name, s52 player faction name, s53 settlement name.
+  ("cai_store_context",
+    [
+      (store_script_param, ":troop", 1),
+      (assign, reg44, "$cai_campaign"),
+      (assign, reg45, "$cai_conv_id"),
+      (assign, reg46, "$cai_mem_head"),
+      (assign, reg47, ":troop"),
+      (store_troop_faction, ":faction", ":troop"),
+      (assign, reg48, ":faction"),
+      (assign, reg49, "$players_kingdom"),
+      (store_relation, reg50, ":faction", "fac_player_faction"),
+      (troop_get_slot, reg51, ":troop", slot_troop_player_relation),
+      (troop_get_slot, reg52, ":troop", slot_lord_reputation_type),
+      (troop_get_slot, reg53, ":troop", slot_troop_occupation),
+
+      (assign, ":status", 0),
+      (try_begin),
+        (main_party_has_troop, ":troop"),
+        (val_or, ":status", CAI_ST_IN_PARTY),
+      (try_end),
+      # Every hero's captor slot is set to -1 at game start; p_main_party is party 0.
+      (troop_get_slot, ":captor", ":troop", slot_troop_prisoner_of_party),
+      (try_begin),
+        (eq, ":captor", "p_main_party"),
+        (neg|main_party_has_troop, ":troop"),
+        (val_or, ":status", CAI_ST_PLAYER_PRISONER),
+      (else_try),
+        (gt, ":captor", 0),
+        (val_or, ":status", CAI_ST_OTHER_PRISONER),
+      (try_end),
+      (try_begin),
+        (faction_slot_eq, ":faction", slot_faction_leader, ":troop"),
+        (val_or, ":status", CAI_ST_FACTION_LEADER),
+      (try_end),
+      (try_begin),
+        (faction_slot_eq, ":faction", slot_faction_marshall, ":troop"),
+        (val_or, ":status", CAI_ST_MARSHAL),
+      (try_end),
+      (try_begin),
+        (troop_slot_eq, "trp_player", slot_troop_spouse, ":troop"),
+        (val_or, ":status", CAI_ST_SPOUSE),
+      (try_end),
+      (try_begin),
+        (troop_slot_eq, "trp_player", slot_troop_betrothed, ":troop"),
+        (val_or, ":status", CAI_ST_BETROTHED),
+      (try_end),
+      (try_begin),
+        (gt, "$players_kingdom", 0),
+        (eq, "$player_has_homage", 1),
+        (val_or, ":status", CAI_ST_PLAYER_VASSAL),
+      (try_end),
+      (try_begin),
+        (eq, "$players_kingdom", "fac_player_supporters_faction"),
+        (faction_slot_eq, "fac_player_supporters_faction", slot_faction_state, sfs_active),
+        (faction_slot_eq, "fac_player_supporters_faction", slot_faction_leader, "trp_player"),
+        (val_or, ":status", CAI_ST_PLAYER_RULER),
+      (try_end),
+      (assign, reg54, ":status"),
+
+      (troop_get_slot, reg55, "trp_player", slot_troop_renown),
+      (assign, reg56, "$player_honor"),
+      # The settlement nearest to the player's party.
+      (assign, ":nearest", 0),
+      (assign, ":nearest_dist", 100000),
+      (try_for_range, ":center", centers_begin, centers_end),
+        (store_distance_to_party_from_party, ":dist", ":center", "p_main_party"),
+        (lt, ":dist", ":nearest_dist"),
+        (assign, ":nearest_dist", ":dist"),
+        (assign, ":nearest", ":center"),
+      (try_end),
+      (try_begin),
+        (eq, ":nearest", 0),
+        (assign, ":nearest_dist", 0),
+      (try_end),
+      (assign, reg57, ":nearest"),
+      (assign, reg58, ":nearest_dist"),
+      (troop_get_type, reg59, "trp_player"),
+
+      (str_store_troop_name, s50, ":troop"),
+      (str_store_faction_name, s51, ":faction"),
+      (str_clear, s52),
+      (try_begin),
+        (gt, "$players_kingdom", 0),
+        (str_store_faction_name, s52, "$players_kingdom"),
+      (try_end),
+      (str_clear, s53),
+      (try_begin),
+        (gt, ":nearest", 0),
+        (str_store_party_name, s53, ":nearest"),
       (try_end),
     ]),
   # --- end Calradia AI ---
