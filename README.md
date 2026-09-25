@@ -1,0 +1,259 @@
+# Warband Module System 1.171 for Python 3
+
+This repository contains the original TaleWorlds **Mount & Blade: Warband Module System**,
+version 1.171, ported from Python 2 to **Python 3.12**. It is managed with **uv** and
+builds natively on Linux.
+
+The Module System is the official modding toolkit for Warband. Game content (troops,
+items, factions, parties, scripts, dialogs, game menus, mission templates, presentations
+and so on) is written as Python data in `module_*.py` files. A set of compiler scripts
+(`process_*.py`) serializes that content into the text files that the Warband engine
+loads from `Modules/<YourModule>/` (`scripts.txt`, `conversation.txt`, `troops.txt`, …).
+
+**Python is used only at compile time.** The game never runs Python. It reads the
+generated `.txt` files. Which Python version produced those files makes no difference to
+the engine, as long as the bytes are the same. For vanilla content, this port proves the
+bytes are the same (see [Compatibility](#compatibility-what-is-and-isnt-verified)).
+
+This is a modernization of the original TaleWorlds source, not a new Module System, and
+it is not based on a community port. It adds no engine extensions (no WSE), no new
+operations and no changes to the file formats.
+
+## What was modernized
+
+| Area | Before | Now |
+|---|---|---|
+| Language | Python 2 | Python 3.12 (`print()`, `range`, `in` instead of `has_key`, `str` methods instead of the `string` module, `isinstance` instead of `types.*Type`, `//` where Python 2 did integer division) |
+| Encoding | implicit bytes | explicit `cp1254` on every compiler read and write, so the two non-ASCII bytes in `module_strings.py` reach `strings.txt` unchanged |
+| Build | `build_module.bat` (Windows, run twice when IDs change) | `uv run warband-build`: one process per stage, repeated automatically until the ID files stop changing |
+| Output location | hard-coded `export_dir` in `module_info.py` | `--output-dir` (default `build/Native/`), with guards against writing into a game install |
+| Environment | global Python 2 | `uv sync` (Python 3.12, pytest, ruff) |
+| Verification | none | byte-for-byte comparison with a Python 2.7 reference build, plus unit and behavior tests |
+
+Legacy files were changed as little as possible. The port commit contains only
+compatibility edits, and the whitespace/line-ending normalization is a separate commit.
+Upstream comments are kept.
+
+## Source and provenance
+
+- **Source**: `mb_warband_module_system_1171.zip` (sha256
+  `b8d5095031ed2b9df0a4020097bea06b6137022a52cd24a9d5c6b575444b16e1`), files dated
+  2012-10-31. It contains `Module_system 1.171/` and `Module_data 1.171/`. The unmodified
+  tree is commit `1c213ba`.
+- **Target game**: this was developed against native Linux Warband **1.174** (Steam).
+  The compiled output matches that game's shipped `Modules/Native` files except for line
+  endings and two credits strings (details below).
+
+## Requirements
+
+- Linux (developed and tested on Ubuntu). There are no Windows, Wine or Proton
+  dependencies. macOS will probably work but has not been tested.
+- [uv](https://docs.astral.sh/uv/). uv downloads Python 3.12 itself, so no system Python
+  is needed.
+
+## Setup
+
+```bash
+uv sync
+```
+
+## Compile the module
+
+```bash
+uv run warband-build                      # writes to ./build/Native/
+uv run warband-build -o ~/some/dir        # choose the output directory
+uv run python -m modsys.build --help      # same tool, as a module
+```
+
+The command works from any working directory. It exits with status 0 on success, 1 if
+compilation failed and 2 if the invocation was refused. Options:
+
+| Option | Meaning |
+|---|---|
+| `-o, --output-dir DIR` | Where to write the 32 generated files (default `build/Native/`). |
+| `--source-dir DIR` | Module System tree to compile (default `game/module_system`). |
+| `--sync-ids` | Copy the regenerated `ID_*.py` files back into the source tree (see below). |
+| `--force` | Allow a non-empty output directory that this tool did not create. |
+| `--allow-native` | Allow an output directory named `Modules/Native`. |
+| `--keep-work` | Keep the temporary work directory for debugging. |
+| `-q, --quiet` | Print only problems. |
+
+What the build does:
+
+1. It copies `game/module_system/` into a temporary work directory, so the source tree is
+   never modified.
+2. It runs the 29 stages listed in `build_module.bat`, in that order. Each stage runs in
+   its own Python process, and the stage list is read from the `.bat` file.
+3. It repeats the whole pass until the `ID_*.py` files are stable, then publishes.
+4. It writes the generated files and a `.modsys-build.json` marker (with the sha256 of
+   each file) to the output directory. It never deletes anything there.
+
+A pass fails if a stage exits with an error or prints a line starting with
+`ERROR`/`Error`. The legacy scripts report unresolved identifiers by printing a message
+and carrying on, so without this check a broken build would look successful. Lines
+starting with `WARNING` are shown but do not fail the build.
+
+### Why each stage runs in its own process
+
+The `process_*.py` scripts do their work when they are imported. `module_*.py` files use
+`from ID_troops import *` and similar imports, which copy numeric IDs into the module at
+import time. Those `ID_*.py` files are written by earlier stages and must be re-imported
+fresh by later ones. The ID files also form a cycle: `module_items` imports
+`module_constants`, which imports `ID_items`. That is why the committed `ID_*.py` files
+are needed to start a build.
+
+When you add, remove or reorder objects, the first pass can see outdated IDs. The driver
+detects that the ID files changed and runs another pass. The original workflow made you
+run `build_module.bat` twice instead. Run with `--sync-ids` to update the committed ID
+files so later builds need only one pass.
+
+One case cannot be solved by repeating passes. If a new identifier is used *while its
+own ID file is still being generated* (for example, a new `itm_x` used inside
+`module_constants.py`), every pass fails the same way. The build stops right away and
+reports the `NameError`. The original tool had the same limitation.
+
+## Install into Warband (native Linux)
+
+The compiler generates only the `.txt` data files. A playable module also needs
+`module.ini`, the `Resource`, `Textures`, `SceneObj`, `Data` and `languages` folders, and
+so on. The simplest approach is to start from a copy of Native. **Never compile into
+Native itself.** The build refuses to do that unless you pass `--allow-native`.
+
+```bash
+GAME="$HOME/.local/share/Steam/steamapps/common/MountBlade Warband"
+# Steam installed as a snap:
+# GAME="$HOME/snap/steam/common/.local/share/Steam/steamapps/common/MountBlade Warband"
+
+cp -r "$GAME/Modules/Native" "$GAME/Modules/MyMod"
+# The first time, the directory has no build marker yet, so --force is required:
+uv run warband-build -o "$GAME/Modules/MyMod" --force
+# Later builds find the marker and don't need --force:
+uv run warband-build -o "$GAME/Modules/MyMod"
+```
+
+Then choose **MyMod** in the launcher. If the game fails to load it, check `rgl_log.txt`
+in the game directory.
+
+### Module_data (flora, skyboxes, ground specs)
+
+`game/module_data/` contains the separate generators for `flora_kinds.txt`,
+`skyboxes.txt` and `ground_specs.txt`. These files belong in a module's `Data/` folder.
+The original `build_module.bat` never ran these generators, and neither does
+`warband-build`:
+
+```bash
+uv run warband-build-data               # writes to ./build/module_data/
+```
+
+Changing ground specs also requires the engine to be recompiled, which is not possible
+with the retail game. The TaleWorlds notes in `game/module_data/readme.txt` explain this.
+
+## Add content
+
+Edit the files in `game/module_system/` exactly as described in any Warband Module
+System tutorial. The file formats and operations are unchanged. Some examples:
+
+- **Script**: add a tuple to the `scripts` list in `module_scripts.py`:
+
+  ```python
+  ("my_mod_give_gold",
+   [
+     (store_script_param_1, ":amount"),
+     (troop_add_gold, "trp_player", ":amount"),
+   ]),
+  ```
+
+  Call it with `(call_script, "script_my_mod_give_gold", 100)`.
+- **Dialogue**: add entries to `dialogs` in `module_dialogs.py`, with the form
+  `[anyone, "start", [conditions], "text", "next_state", [consequences]]`. Order matters,
+  because the first matching entry wins.
+- **Troops, items, factions, parties, menus, triggers**: edit `module_troops.py`,
+  `module_items.py`, `module_factions.py`, `module_parties.py`, `module_game_menus.py`
+  and `module_triggers.py` / `module_simple_triggers.py` in the same way.
+- **Operations and flags** are defined in `header_operations.py` and the other
+  `header_*.py` files. Do not renumber them, because the numbers are what the engine
+  executes.
+
+Then run `uv run warband-build`, and `uv run warband-build --sync-ids` if you added or
+reordered objects. The legacy sources are plain Python 3, and `from X import *` is still
+how they share names. They are deliberately not reorganized into a package.
+
+## Tests and linting
+
+```bash
+uv run pytest -q          # full suite, about 2.5 minutes (each full build takes about 10 s)
+uv run ruff check .
+uv run ruff format --check .
+```
+
+| Test file | What it checks |
+|---|---|
+| `test_golden.py` | The 32 export files, the final `ID_*.py` files and the committed `ID_*.py` files are byte-identical to the Python 2.7 reference. It first checks the reference against `MANIFEST.json`. Negative controls confirm that the comparator catches a flipped byte, LF→CRLF, a missing or extra file, and a UTF-8-re-encoded `0x97`. |
+| `test_build.py` | A fresh build succeeds in one pass. The build works from any directory and with output paths containing spaces or `&`. `game/` is unchanged afterwards. The output guards work. A decoy `PYTHONPATH`/`PYTHONSAFEPATH` is ignored. The stage list matches `build_module.bat`. Exit codes are correct. |
+| `test_fixpoint.py` | Reordered troops, a new troop used by a new party, and a new item used by a troop each build correctly in a single invocation. The unsolvable case fails quickly with a clear message. |
+| `test_determinism.py` | Builds with different hash seeds and locale/UTF-8 modes are byte-identical to each other and to the reference. |
+| `test_serialization.py` | Operand encoding (`$global`, `:local`, `@quick string`, tagged IDs, negative and large ints), opmask and opcode values, identifier escaping, `%f` float formatting, and integer division rounding down for negative numbers. |
+| `test_identifiers.py` | IDs such as `trp_player == 0` stay stable, and every generated ID file equals the reference. |
+| `test_module_data.py` | The Module_data output is byte-identical to the reference. |
+| `test_driver_unit.py` | The driver's own logic, tested against a small fake module (fixpoint, error detection, guards, publishing). |
+
+Ruff applies the full rule set to `src/` and `tests/`. For the legacy `game/` tree, it
+only checks for syntax errors and undefined names, and it does not format that tree. This
+keeps the migration diff reviewable. See `game/ruff.toml`.
+
+### The reference build
+
+`tests/golden/` holds the output of the **unmodified** Module System (commit `1c213ba`)
+compiled by Python **2.7.18** in the Docker image
+`python:2.7.18-slim@sha256:6c1ffdff…3992363`. `MANIFEST.json` records the provenance and
+the sha256 of every file. Two independent runs of that build were byte-identical. Docker
+and Python 2 are **not** needed to build or test. They are only needed to reproduce the
+reference:
+
+```bash
+tools/make_reference.sh /tmp/ref     # compare /tmp/ref with tests/golden
+```
+
+Do not regenerate `tests/golden` to make a failing test pass. The reference comes from
+the original sources, so a real regression in the port cannot pass by changing it.
+
+## Compatibility: what is and isn't verified
+
+**Verified by automated tests:**
+
+- All 32 files the compiler produces are **byte-identical** to the Python 2.7 reference
+  build of the original sources. The same holds for the 23 `ID_*.py` files and the 5
+  Module_data outputs.
+- Output does not depend on hash seed, locale or `PYTHONUTF8`.
+
+**Verified manually, once:**
+
+- The Python 2.7 reference output equals the `Modules/Native` files shipped with Linux
+  Warband 1.174, with two exceptions:
+  - The shipped files use CRLF line endings, because they were built on Windows. The
+    Linux build uses LF, just as Python 2 on Linux does.
+  - `strings.txt` differs in `str_credits_3` and `str_credits_9`. TaleWorlds updated
+    those credits after 1.171.
+
+**Not verified:**
+
+- The game was not launched with the compiled module. Byte identity with the Python 2
+  build means the port introduces nothing new. Whether the engine accepts LF line
+  endings where the shipped files use CRLF has not been tested. Before relying on it,
+  build into a copy module, start a new game and check `rgl_log.txt`.
+
+## Known limitations
+
+- **Encoding**: all compiler I/O uses `cp1254`, the encoding declared by
+  `module_strings.py`. Text that cannot be encoded in cp1254 fails loudly instead of being
+  written incorrectly. Mods that need other scripts should convert the files and test
+  carefully.
+- **Line endings**: output is LF only. No CRLF option is provided.
+- **Latent upstream bugs, deliberately unchanged**:
+  - `header_parties.carries_gold` references an undefined `big_num`.
+  - `process_operations.py` calls `has_key` on a list, a path vanilla never reaches.
+  - `process_global_variables.py` prints an undefined name in an error path.
+  - `header_common.reg()` calls an undefined `cause_error()` on purpose to abort.
+- `process_line_correction.py` and `process_tags_unused.py` were ported so that they
+  compile, but they are not part of the build, just as in the original.
+- `build_module.bat` is kept only as the source of the stage order and as provenance.
