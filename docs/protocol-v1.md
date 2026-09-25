@@ -171,11 +171,11 @@ callback are the same as in v1. A v1 client keeps working against a v2 server.
 ### Request URL
 
 ```
-/v2/talk?v=2&rid={regA}&job={regB}&camp={regE}&conv={regF}&head={regG}&troop={regH}&day={regD}&fac={regI}&pfac={regJ}&frel={regK}&rel={regL}&rep={regM}&occ={regN}&st={regO}&ren={regP}&hon={regQ}&loc={regR}&ldist={regS}&pg={regT}&pname={s65}&nname={s50}&fname={s51}&pfname={s52}&lname={s53}&msg={s66}&end=1
+/v2/talk?v=2&rid={regA}&job={regB}&camp={regE}&conv={regF}&head={regG}&troop={regH}&day={regD}&fac={regI}&pfac={regJ}&frel={regK}&rel={regL}&rep={regM}&occ={regN}&st={regO}&ren={regP}&hon={regQ}&loc={regR}&ldist={regS}&pg={regT}&wars={regU}&pname={s65}&nname={s50}&fname={s51}&pfname={s52}&lname={s53}&ruler={s54}&spouse={s55}&father={s56}&msg={s66}&end=1
 ```
 
-The template rules of v1 apply. `script_cai_store_context` fills reg44..reg59 and
-s50..s53 right before the send. Every value is read from the game at that moment:
+The template rules of v1 apply. `script_cai_store_context` fills reg43..reg59 and
+s50..s56 right before the send. Every value is read from the game at that moment:
 
 | Field | Game source | Server rule |
 |---|---|---|
@@ -197,10 +197,14 @@ s50..s53 right before the send. Every value is read from the game at that moment
 | `loc` | the town, castle or village nearest to `p_main_party` (0 = none) | index into `ID_parties.py` |
 | `ldist` | `store_distance_to_party_from_party` to it (map units) | unsigned |
 | `pg` | `troop_get_type` of the player (1 = female) | 0 or 1 |
+| `wars` (optional) | the active realms (`kingdoms_begin`..`kingdoms_end`) at war with the NPC's faction: bit k = `fac_player_supporters_faction` + k | 0..=127; if absent, nothing is said about wars |
 | `pname`, `nname`, `fname`, `pfname`, `lname` | names of the player, NPC, NPC's faction, player's faction (empty if none), location | sanitized; `pname` cut to 32, the others to 40 characters |
+| `ruler`, `spouse`, `father` (optional) | names of the NPC's liege (leader of the NPC's realm, when that is not the NPC), spouse (other than the player) and father (`slot_troop_father`) | as the names above; empty or absent = none |
 | `msg` | the player's message | as in v1 |
 
-Signed values arrive as `-N` (`%2DN` on the wire). Every integer must lie within
+`wars`, `ruler`, `spouse` and `father` were added after the first v2 build and are
+optional, so a mod built from that commit still talks to this server. Signed values arrive
+as `-N` (`%2DN` on the wire). Every integer must lie within
 ±`MAX_STAT` (1000000); anything missing or out of range is `bad_param`.
 
 Status bits (`st`), mirrored in `module_scripts.py` as `CAI_ST_*`:

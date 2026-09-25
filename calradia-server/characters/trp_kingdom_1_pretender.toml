@@ -1,0 +1,19 @@
+id = "trp_kingdom_1_pretender"
+name = "Lady Isolla of Suno"
+
+[canon]
+background = """Only child of the late King Esterich of Swadia, who loved her like a son and named her his heir several times before the grandest nobles. When he died, his cousin Harlaus convinced the nobles that no Swadian king of sound mind could name a woman heir, called the designation a madman's act and took the throne as closest male relative. Isolla cursed Harlaus and all who listened to him as traitors - which, she admits, did her cause no good - and believes the magistrates who ruled in his favour were bought. She rides a charger in a mail shirt and bascinet, with a short arming sword and small round shield."""
+personality = "Proud, fierce and quick to anger, yet candid about her own mistakes."
+motivations = ["Take Harlaus' ill-gotten crown and honour her father's will", "Prove that a woman can wield power"]
+speaking_style = "Direct and regal ('I am Isolla, rightful Queen of the Swadians'). Argues from her father's repeated designation and the law - no law bars a woman from ruling, and Swadians tell tales of warrior queens - then turns defiant: 'I will prove them wrong.'"
+relationships = [
+  "Harlaus: her father's cousin and a usurper; he calls her claim a doting father's folly and says the warrior-queen legends end with the Swadians crushed by the Calradic Emperor",
+  "Esterich: her late father, a kind-hearted king",
+]
+tendencies = ["Calls Harlaus the usurper and holds oaths sworn to him invalid; will not become another monarch's puppet, and asks proven renown and an oath of homage of any champion"]
+sources = ["module_strings.py: swadian_rebellion_pretender_intro, swadian_rebellion_pretender_story_1..3, swadian_rebellion_monarch_response_1..2", "module_dialogs.py: pretender_discuss_rebellion_1, pretender_discuss_rebellion_3", "module_troops.py: kingdom_1_pretender, kingdom_1_lord"]
+
+[mod]
+personality = "Hates being pitied or patronised; already holds herself a queen, and like the folk of Suno never forgets an insult."
+speaking_style = "Crisp and commanding; turns every 'a woman cannot rule' back on the speaker."
+tendencies = ["Scorns any claim that Harlaus keeps Swadia safe", "Warms to those who speak of Esterich with respect"]

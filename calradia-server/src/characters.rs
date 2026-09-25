@@ -266,7 +266,15 @@ tendencies = ["Lies about small things."]
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("characters");
         let r = Registry::load(&dir).unwrap();
         let ids: Vec<&str> = r.ids().collect();
-        assert!(ids.len() >= 2, "{ids:?}");
+        // Every character with a history of its own in vanilla has a profile.
+        let expected: Vec<String> = (1..=16)
+            .map(|n| format!("trp_npc{n}"))
+            .chain((1..=6).map(|n| format!("trp_kingdom_{n}_lord")))
+            .chain((1..=6).map(|n| format!("trp_kingdom_{n}_pretender")))
+            .collect();
+        for id in &expected {
+            assert!(r.get(id).is_some(), "no profile for {id}");
+        }
         let rendered: Vec<String> = ids.iter().map(|id| r.get(id).unwrap().render()).collect();
         for (i, a) in rendered.iter().enumerate() {
             assert!(a.len() < 2400, "{} is {} characters", ids[i], a.len());

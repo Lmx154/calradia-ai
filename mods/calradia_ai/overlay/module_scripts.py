@@ -50953,7 +50953,7 @@ scripts = [
   # The URL templates are the quick-string operands themselves, so that encode_url = 1
   # percent-encodes every substituted value. Registers: reg60 = rid, reg61 = job,
   # reg62 = npc, reg63 = day; s65 = player name (scratch), s66 = message; for /v2/talk
-  # also reg44..reg59 and s50..s53 from script_cai_store_context.
+  # also reg43..reg59 and s50..s56 from script_cai_store_context.
   ("cai_tx_send",
     [
       (store_script_param, ":op", 1),
@@ -50986,7 +50986,7 @@ scripts = [
         (else_try),
           # CAI_OP_TALK with a character.
           (call_script, "script_cai_store_context", "$cai_talk_troop"),
-          (send_message_to_url, "@http://127.0.0.1:8766/v2/talk?v=2&rid={reg60}&job={reg61}&camp={reg44}&conv={reg45}&head={reg46}&troop={reg47}&day={reg63}&fac={reg48}&pfac={reg49}&frel={reg50}&rel={reg51}&rep={reg52}&occ={reg53}&st={reg54}&ren={reg55}&hon={reg56}&loc={reg57}&ldist={reg58}&pg={reg59}&pname={s65}&nname={s50}&fname={s51}&pfname={s52}&lname={s53}&msg={s66}&end=1", 1),
+          (send_message_to_url, "@http://127.0.0.1:8766/v2/talk?v=2&rid={reg60}&job={reg61}&camp={reg44}&conv={reg45}&head={reg46}&troop={reg47}&day={reg63}&fac={reg48}&pfac={reg49}&frel={reg50}&rel={reg51}&rep={reg52}&occ={reg53}&st={reg54}&ren={reg55}&hon={reg56}&loc={reg57}&ldist={reg58}&pg={reg59}&wars={reg43}&pname={s65}&nname={s50}&fname={s51}&pfname={s52}&lname={s53}&ruler={s54}&spouse={s55}&father={s56}&msg={s66}&end=1", 1),
         (try_end),
       (try_end),
     ]),
@@ -51012,8 +51012,10 @@ scripts = [
   # faction ($players_kingdom), reg50 relation of the NPC's faction with fac_player_faction,
   # reg51 NPC's relation with the player, reg52 reputation type, reg53 occupation, reg54
   # status bits (CAI_ST_*), reg55 player renown, reg56 player honour, reg57 nearest
-  # settlement (0 if none), reg58 its map distance, reg59 player troop type (1 = female);
-  # s50 NPC name, s51 NPC faction name, s52 player faction name, s53 settlement name.
+  # settlement (0 if none), reg58 its map distance, reg59 player troop type (1 = female),
+  # reg43 the active realms the NPC's faction is at war with (bit k = kingdoms_begin + k);
+  # s50 NPC name, s51 NPC faction name, s52 player faction name, s53 settlement name,
+  # s54 the NPC's liege, s55 spouse and s56 father (each empty if none or not applicable).
   ("cai_store_context",
     [
       (store_script_param, ":troop", 1),
@@ -51103,6 +51105,41 @@ scripts = [
       (try_begin),
         (gt, ":nearest", 0),
         (str_store_party_name, s53, ":nearest"),
+      (try_end),
+
+      # The realms at war with the NPC's own.
+      (assign, ":wars", 0),
+      (try_for_range, ":realm", kingdoms_begin, kingdoms_end),
+        (neq, ":realm", ":faction"),
+        (faction_slot_eq, ":realm", slot_faction_state, sfs_active),
+        (store_relation, ":realm_relation", ":faction", ":realm"),
+        (lt, ":realm_relation", 0),
+        (store_sub, ":bit", ":realm", kingdoms_begin),
+        (assign, ":mask", 1),
+        (val_lshift, ":mask", ":bit"),
+        (val_or, ":wars", ":mask"),
+      (try_end),
+      (assign, reg43, ":wars"),
+      # The NPC's liege (a realm's leader may be the player, troop 0), spouse and father.
+      (str_clear, s54),
+      (try_begin),
+        (is_between, ":faction", kingdoms_begin, kingdoms_end),
+        (faction_get_slot, ":ruler", ":faction", slot_faction_leader),
+        (ge, ":ruler", 0),
+        (neq, ":ruler", ":troop"),
+        (str_store_troop_name, s54, ":ruler"),
+      (try_end),
+      (str_clear, s55),
+      (troop_get_slot, ":spouse", ":troop", slot_troop_spouse),
+      (try_begin),
+        (gt, ":spouse", 0), # 0 is the player, reported by CAI_ST_SPOUSE
+        (str_store_troop_name, s55, ":spouse"),
+      (try_end),
+      (str_clear, s56),
+      (troop_get_slot, ":father", ":troop", slot_troop_father),
+      (try_begin),
+        (gt, ":father", 0),
+        (str_store_troop_name, s56, ":father"),
       (try_end),
     ]),
   # --- end Calradia AI ---

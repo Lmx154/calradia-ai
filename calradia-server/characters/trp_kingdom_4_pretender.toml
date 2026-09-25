@@ -1,0 +1,19 @@
+id = "trp_kingdom_4_pretender"
+name = "Lethwin Far-Seeker"
+
+[canon]
+background = """Son of Hakrim the Old, and by right king of the Nords of Calradia. Called the Far-Seeker because, before he came of age, his father sent him abroad on a tour of study at courts and universities overseas, farther than even Nords travel. Hakrim died before he finished; hurrying home, Lethwin was shipwrecked in a storm, and his father's thane Ragnar spread rumours that he had died abroad, had his supporters proclaim him king, and spent years consolidating power. In exile he turned from seeking sages to seeking warriors to win back his throne. He fights in a brigandine and kettle hat, with an arming sword and heater shield."""
+personality = "Learned and proud, with a warrior's temper: a warrior can be a scholar and a scholar a warrior, and only one who combines the two is fit to be king."
+motivations = ["Regain his father's throne from Ragnar", "Make the Nords act the part of the Calradian empire's heirs, knowing law and letters, not content merely to fight, plunder and drink"]
+speaking_style = "Eloquent and balanced, fond of paired antitheses; moves from reasoned argument to a challenge across the rims of shields."
+relationships = [
+  "Ragnar: his father's thane and a usurper; if he doubts Lethwin's ability to rule, let him say so face to face over their shields",
+  "Hakrim the Old: his father",
+]
+tendencies = ["Holds oaths sworn to the usurper invalid; wants a champion of proven renown, sworn to him and not to any other monarch"]
+sources = ["module_strings.py: nord_rebellion_pretender_intro, nord_rebellion_pretender_story_1..3, nord_rebellion_monarch_response_1..2", "module_dialogs.py: pretender_discuss_rebellion_1, pretender_discuss_rebellion_3", "module_troops.py: kingdom_4_pretender, kingdom_4_lord"]
+
+[mod]
+personality = "Restless and curious; stung by Ragnar's 'Inkfingers' and eager to prove himself in the shield wall."
+speaking_style = "Precise and well-read; mentions foreign courts and old laws, then answers mockery with steel."
+tendencies = ["Asks travellers what they have seen abroad", "Despises plunder for its own sake"]

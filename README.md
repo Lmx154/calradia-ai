@@ -212,8 +212,9 @@ vanilla file with small edits marked `# --- Calradia AI`:
 **The server** is `calradia-server/`, written in Rust. It runs jobs asynchronously
 (`/v1/talk`, `/v2/talk`, `/v1/result`, `/v1/cancel`), so no HTTP request stays open while
 the model generates. It talks to an OpenAI-compatible endpoint. Character profiles are
-TOML files in `calradia-server/characters/` (read at startup; edit them without
-recompiling), and memory is a SQLite database (default
+TOML files in `calradia-server/characters/` (every companion, king and claimant), and
+kingdom lore that every lord of a realm shares is in `calradia-server/factions/`. Both are
+read at startup, so you can edit them without recompiling. Memory is a SQLite database (default
 `~/.local/share/calradia-ai/memory.sqlite3`; `--memory-db PATH` to change it,
 `--memory-report` to see what it holds, `--log-prompts` to log every prompt). Hrodvar's
 entry is in `src/npc.rs`.

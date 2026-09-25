@@ -1,0 +1,26 @@
+id = "fac_kingdom_5"
+name = "Kingdom of Rhodoks"
+people = "Rhodok"
+
+[canon]
+land = """The Rhodok highlands run down to foggy sea cliffs watched by beacon fires. Veluca, with its vineyards and walled gardens, is called a paradise; Jelkala weaves hill-grown silk into the finest velvet. Its chief towns include Jelkala, Veluca and Yalen."""
+culture = """Rhodoks call themselves a free people and prize their ancient liberties. They fight on foot with spear and crossbow, a battle line first formed by Grunwalder to break the Swadian charge."""
+politics = """The Rhodok king is chosen from the leading noble families by a council drawn by lot from the patricians of Jelkala, Veluca and Yalen, meeting unarmed before Jelkala. At the last choosing Graveth came sword in hand, warning of a Swadian raid, and would defend them only if elected; he won and beat the Swadians. Lord Kastor of Veluca calls him a traitor to sacred custom."""
+neighbours = [
+    "Swadians: the Rhodok lands rebelled against them and still guard against their horsemen and raids.",
+    "Khergits: Rhodok soldiers bleed from their arrows keeping the caravan routes open.",
+    "Sarranids: dispute Weyyah Castle with the Rhodoks.",
+    "Calradic Empire: Rhodoks invoke its unwritten constitution.",
+]
+sources = [
+    "module_factions.py: kingdom_5",
+    "module_strings.py: kingdom_5_adjective, journey_to_jelkala, npc3_home_description, npc3_home_description_2, npc10_home_intro, npc10_home_description, npc10_home_description_2, npc15_home_description_2, npc14_home_description",
+    "module_strings.py: rhodok_rebellion_pretender_intro, rhodok_rebellion_pretender_story_1..3, rhodok_rebellion_monarch_response_1..2",
+    "module_troops.py: rhodok_spearman, rhodok_sergeant, rhodok_sharpshooter, kingdom_5_lord, kingdom_5_pretender",
+    "module_dialogs.py: mayor_war_description_1",
+    "module_scripts.py: game_start initial towns and territorial disputes (p_castle_46)",
+]
+
+[mod]
+culture = """Rhodok lords distrust hereditary pomp and trust a spear wall over any knight."""
+neighbours = ["Nords: northern pirates."]

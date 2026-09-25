@@ -21,6 +21,7 @@ use crate::prompt::{self, Chat};
 use crate::protocol::{
     Talk, TalkV2, REASON_CANCELED, REASON_CONFLICT, REASON_MEMORY_ERROR, REASON_MEMORY_UNAVAILABLE,
 };
+use crate::realms::Realms;
 use crate::sanitize::sanitize_text;
 use crate::upstream::{Backend, Failure};
 use std::net::TcpStream;
@@ -29,6 +30,7 @@ use std::sync::Arc;
 pub struct Runner {
     pub backend: Backend,
     pub characters: Registry,
+    pub realms: Realms,
     pub memory: Arc<Memory>,
     /// Log every prompt in full (`--log-prompts`).
     pub log_prompts: bool,
@@ -123,7 +125,7 @@ impl Runner {
                 t.character
             ));
         }
-        let chat = prompt::v2_chat(t, profile, &recall);
+        let chat = prompt::v2_chat(t, profile, &self.realms, &recall);
         log(format!(
             "job {id} memory: chain {} turns, {} with {} in {} conversations; using {} of this \
              talk, {} recent, {} relevant; prompt {} characters",

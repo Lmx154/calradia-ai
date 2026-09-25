@@ -44,15 +44,35 @@ sources = ["module_strings.py: npc1_backstory_b", "module_scripts.py initialize_
 personality = "..."      # same keys as [canon], without sources
 ```
 
-Shipped profiles: **Borcha**, **Marnid** and **Matheld** (companions), and **King
-Harlaus** and **King Ragnar**. Their canonical parts come from the companion strings and
-`initialize_npcs`, and from the pretender stories and "monarch responses" in
-`module_strings.py`.
+Shipped profiles cover every character that vanilla gives a history of its own:
 
-Characters without a file still talk, with a generic profile built from live data: their
-name, kind (lord, lady, king, claimant or companion) and this campaign's
-`slot_lord_reputation_type`, described in the words of Native's own comments (martial,
-quarrelsome, cunning, and so on). The prompt tells them not to invent a detailed past.
+- **All 16 companions.** Canon comes from their `npcN_*` strings (backstory, speeches,
+  home, retirement, objections) and `initialize_npcs`: morality, the companions each one
+  clashes with or admires and why, home, kingdom of origin, and which kind of claim to a
+  throne they would back.
+- **The six kings and the six claimants.** Canon comes from the pretender stories and the
+  kings' "monarch responses" in `module_strings.py`: how each throne was taken, the family
+  feud behind it, and what each side says of the other.
+
+Vanilla lords and ladies have no history of their own; the game rolls their personalities
+and marriages at the start of each campaign. They are made specific by three layers,
+none of them invented per lord:
+
+1. **Kingdom lore**, `calradia-server/factions/fac_kingdom_N.toml`. It is shared by every
+   member of the realm: land and chief towns, people and customs, how they fight, the
+   ruler and the claimant, and old rivalries with the other realms. It comes from the
+   `journey_to_*` intros, the pretender stories and the companions' descriptions of their
+   homelands. The format mirrors character profiles: `id`, `name`, `people`, and `[canon]`
+   (`land`, `culture`, `politics`, `neighbours`, `sources`) apart from `[mod]`. It is
+   loaded at startup from `--factions DIR` (env `CALRADIA_FACTIONS`).
+2. **Live facts** sent by the game each time: their liege, spouse and father by name, and
+   which realms their kingdom is at war with right now (see the protocol).
+3. **This campaign's personality** (`slot_lord_reputation_type`), described in the words
+   of Native's own comments (martial, quarrelsome, cunning, and so on). The prompt tells
+   them not to invent deeds or relatives beyond the ones the game names.
+
+Characters with a profile get the kingdom lore and live facts too. A king hears his own
+realm's lore and who he is at war with.
 
 Troop indices from the game are mapped to identifiers using the `ID_troops.py`,
 `ID_factions.py` and `ID_parties.py` files compiled into the server (`src/ids.rs`). The mod
@@ -60,19 +80,21 @@ does not change troops, factions or parties; a test enforces this.
 
 ## What the prompt contains
 
-The prompt has five separate parts:
+The prompt has six separate parts:
 
 1. **Character profile**: canon, then mod traits.
-2. **Live game state**, only what the game sent: day; nearest settlement and whether the
+2. **Kingdom lore** of the NPC's realm, if it has a file.
+3. **Live game state**, only what the game sent: day; nearest settlement and whether the
    player is at or near it; the NPC's realm and whether they rule it or are its marshal;
+   their liege, spouse and father; the realms their kingdom is at war with;
    whether they ride with the player, are the player's or someone's prisoner, or are the
    player's spouse or betrothed; whether they are a claimant in exile; the player's sex,
    renown and honour (number plus a word); the player's allegiance (none, vassal,
    mercenary, own realm); personal relation (-100..100); and whether the realms are
    hostile.
-3. **Memories**: see "Recall" in the protocol document.
-4. **The current conversation** as chat turns, ending with the player's message.
-5. **Rules**: first person, 1 to 3 sentences, no narration or speaking for the player;
+4. **Memories**: see "Recall" in the protocol document.
+5. **The current conversation** as chat turns, ending with the player's message.
+6. **Rules**: first person, 1 to 3 sentences, no narration or speaking for the player;
    knows only what is supplied; does not present invented events between them as fact.
    The NPC has its own goals and need not agree, like, trust or help the player; pride,
    rudeness, evasion and deceit are allowed. Words only: no giving money, goods, troops
@@ -187,7 +209,9 @@ Automated (`cargo test` in `calradia-server`, `uv run pytest`):
 | Oversized contexts | `oversized_context_is_bounded`, `recall_is_bounded_and_deterministic` |
 | Model server failure | `model_failures_store_nothing` |
 | Protocol compatibility | all Milestone 2 server tests unchanged; `v2_request_validation_and_v1_compatibility`; `test_url_templates_follow_the_protocol`, `test_protocol_constants_match_the_server` |
-| Profile files | `rejects_bad_profiles_naming_the_file` |
+| Profile files; every companion, king and claimant has one | `rejects_bad_profiles_naming_the_file`, `shipped_profiles_are_valid_and_distinct` |
+| Kingdom lore for all six realms under their vanilla names | `shipped_realms_cover_every_kingdom_by_its_vanilla_name`, `rejects_bad_realms_naming_the_file` |
+| Liege, spouse, father and wars; older mod builds without them | `situation_names_liege_family_and_wars`, `missing_profiles_fall_back_to_live_data` |
 | Game side: vanilla preserved, dialog lines appended, read-only code, single send site | `tests/test_calradia_ai.py` (plus the golden-file suites, unchanged) |
 
 Manually verified: nothing yet in game. On 2026-09-25 the release binary was run by hand

@@ -210,6 +210,15 @@ fn shipped_characters() -> Registry {
     .unwrap()
 }
 
+/// The shipped kingdom lore.
+fn shipped_realms() -> Realms {
+    Realms::load(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/factions"
+    )))
+    .unwrap()
+}
+
 fn serve(runner: Runner, limits: Limits, npcs: &'static [Npc]) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -221,6 +230,7 @@ fn server(url: &str, limits: Limits, npcs: &'static [Npc]) -> SocketAddr {
     let runner = Runner {
         backend: upstream_backend(url),
         characters: shipped_characters(),
+        realms: shipped_realms(),
         memory: Arc::new(Memory::in_memory()),
         log_prompts: false,
     };
@@ -1087,6 +1097,11 @@ struct V2 {
     fname: &'static str,
     pfname: &'static str,
     lname: &'static str,
+    /// Sent only when set, as by the current mod; None mimics an older build.
+    wars: Option<u32>,
+    ruler: &'static str,
+    spouse: &'static str,
+    father: &'static str,
     msg: String,
 }
 
@@ -1114,6 +1129,10 @@ fn borcha(msg: &str) -> V2 {
         fname: "Commoners",
         pfname: "",
         lname: "Praven",
+        wars: Some(0),
+        ruler: "",
+        spouse: "",
+        father: "",
         msg: msg.to_string(),
     }
 }
@@ -1130,6 +1149,9 @@ fn harlaus(msg: &str) -> V2 {
         rel: -15,
         frel: -30,
         ldist: 0,
+        // Bits: fac_kingdom_2 and fac_kingdom_3 (supporters faction is bit 0).
+        wars: Some(1 << 2 | 1 << 3),
+        spouse: "Lady Esmerelda",
         ..borcha(msg)
     }
 }
@@ -1139,7 +1161,7 @@ fn v2_url(rid: u32, job: u32, v: &V2) -> String {
     format!(
         "/v2/talk?v=2&rid={rid}&job={job}&camp={}&conv={}&head={}&troop={}&day={}&fac={}\
          &pfac={}&frel={}&rel={}&rep={}&occ={}&st={}&ren={}&hon={}&loc={}&ldist={}&pg={}\
-         &pname={}&nname={}&fname={}&pfname={}&lname={}&msg={}&end=1",
+         {}&pname={}&nname={}&fname={}&pfname={}&lname={}{}&msg={}&end=1",
         v.camp,
         v.conv,
         v.head,
@@ -1157,11 +1179,22 @@ fn v2_url(rid: u32, job: u32, v: &V2) -> String {
         ids.parties.index(v.loc).unwrap(),
         v.ldist,
         v.pg,
+        v.wars.map_or(String::new(), |w| format!("&wars={w}")),
         enc(v.pname),
         enc(v.nname),
         enc(v.fname),
         enc(v.pfname),
         enc(v.lname),
+        if v.wars.is_some() {
+            format!(
+                "&ruler={}&spouse={}&father={}",
+                enc(v.ruler),
+                enc(v.spouse),
+                enc(v.father)
+            )
+        } else {
+            String::new()
+        },
         enc(&v.msg)
     )
 }
@@ -1185,6 +1218,7 @@ fn memory_server(url: &str, memory: Arc<Memory>) -> SocketAddr {
     let runner = Runner {
         backend: upstream_backend(url),
         characters: shipped_characters(),
+        realms: shipped_realms(),
         memory,
         log_prompts: false,
     };
@@ -1280,6 +1314,9 @@ fn different_characters_get_different_profiles_and_faction_context() {
             "You and Ylva are at Praven, a town.",
             "relation with Ylva is -15 on a scale from -100 to 100: you dislike them.",
             "Your realm is hostile to Ylva and their side (relation -30).",
+            "Your realm is at war with Kingdom of Vaegirs and Khergit Khanate.",
+            "You are married to Lady Esmerelda.",
+            "What you know as one of the Swadian (Kingdom of Swadia):\nLand:",
         ],
     );
     assert!(!h.contains("Borcha") && !b.contains("Harlaus"));
@@ -1301,14 +1338,34 @@ fn missing_profiles_fall_back_to_live_data() {
         rep: 4,
         occ: 2,
         st: 0,
+        ruler: "King Harlaus",
+        father: "Count Ancestor",
         ..borcha("Good day, my lord.")
     };
     assert_eq!(say(addr, 1, &lord).code, CODE_READY);
-    contains_all(&up.messages(0)[0].1, &[
+    let system = up.messages(0)[0].1.clone();
+    contains_all(&system, &[
         "You are Count Plais, a lord of Calradia.\nPersonality: cunning: cold-blooded, pragmatic and amoral.",
         "No personal history has been written for you",
-        "You belong to Kingdom of Swadia.",
+        // The realm's lore stands in for a personal history.
+        "What you know as one of the Swadian (Kingdom of Swadia):\nLand:",
+        "You belong to Kingdom of Swadia.\n- Your liege is King Harlaus.",
+        "Your father: Count Ancestor.",
+        "Your realm is at war with no other realm.",
     ]);
+    // An older mod build sends none of the optional fields: nothing about them is stated.
+    let old = V2 {
+        wars: None,
+        ..lord.clone()
+    };
+    assert!(!v2_url(1, 2, &old).contains("wars="));
+    assert_eq!(say(addr, 2, &V2 { conv: 101, ..old }).code, CODE_READY);
+    let system = up.messages(1)[0].1.clone();
+    assert!(
+        !system.contains("liege") && !system.contains("Your realm is at war with"),
+        "{system}"
+    );
+    assert!(system.contains("Kingdom of Swadia):\nLand:"));
 }
 
 #[test]
@@ -1657,6 +1714,8 @@ fn v2_request_validation_and_v1_compatibility() {
         ("day=12&".into(), "day=100001&".into()),
         ("fac=1&".into(), "fac=999&".into()),
         ("st=1&".into(), "".into()),
+        ("&wars=0&".into(), "&wars=128&".into()),
+        ("&wars=0&".into(), "&wars=x&".into()),
     ] {
         assert_eq!(
             swap(from.clone(), to.clone()),
@@ -1665,6 +1724,25 @@ fn v2_request_validation_and_v1_compatibility() {
         );
     }
     assert_eq!(ask(&url(&borcha(&"a".repeat(301)))), bad("too_long"));
+    // The largest talk the mod can send fits in MAX_TARGET: every name and the message at
+    // their caps, all in characters the engine percent-encodes, and 9-digit ids.
+    let wide = |n: usize| -> &'static str { Box::leak(",".repeat(n).into_boxed_str()) };
+    let widest = V2 {
+        camp: RID_MAX,
+        conv: RID_MAX,
+        head: RID_MAX,
+        pname: wide(MAX_PNAME),
+        nname: wide(MAX_NAME),
+        fname: wide(MAX_NAME),
+        pfname: wide(MAX_NAME),
+        lname: wide(MAX_NAME),
+        ruler: wide(MAX_NAME),
+        spouse: wide(MAX_NAME),
+        father: wide(MAX_NAME),
+        ..borcha(&"?".repeat(MAX_MSG))
+    };
+    let target = v2_url(RID_MAX, RID_MAX, &widest);
+    assert!(target.len() < MAX_TARGET, "{}", target.len());
     assert_eq!(ask(&url(&borcha(" "))), bad("empty_msg"));
     assert_eq!(up.hits(), 0);
     // Negative values arrive percent-encoded, as the engine sends them; long names are cut.
@@ -1700,6 +1778,7 @@ fn fake_llm_summarizes_what_the_prompt_contains() {
             kind: Canned::Reply,
         },
         characters: shipped_characters(),
+        realms: shipped_realms(),
         memory: Arc::new(Memory::in_memory()),
         log_prompts: true,
     };

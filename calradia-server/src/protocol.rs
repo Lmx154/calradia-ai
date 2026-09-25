@@ -44,6 +44,9 @@ pub const ST_SPOUSE: u32 = 32;
 pub const ST_BETROTHED: u32 = 64;
 pub const ST_PLAYER_VASSAL: u32 = 128;
 pub const ST_PLAYER_RULER: u32 = 256;
+/// The `wars=` mask has one bit per realm, from `fac_player_supporters_faction` (bit 0)
+/// through `fac_kingdom_6` (bit 6), as in module_constants.py kingdoms_begin..kingdoms_end.
+pub const WARS_MAX: u32 = 127;
 
 pub const JOB_DEADLINE_SECS: u64 = 90;
 pub const GAME_GIVE_UP_SECS: u64 = 120;
@@ -138,6 +141,13 @@ pub struct GameContext {
     pub faction_name: String,
     pub player_faction_name: String,
     pub location_name: String,
+    /// Optional fields (added after the first v2 build, so absent from older mods):
+    /// the realms the NPC's faction is at war with (`WARS_MAX` bits), and the names of the
+    /// NPC's liege, spouse and father as the game shows them (empty if none or not sent).
+    pub wars: Option<u32>,
+    pub ruler_name: String,
+    pub spouse_name: String,
+    pub father_name: String,
 }
 
 /// The validated parameters of a `/v2/talk`.
@@ -166,7 +176,7 @@ impl TalkV2 {
 #[derive(Clone, Debug)]
 pub enum Talk {
     V1(TalkParams),
-    V2(TalkV2),
+    V2(Box<TalkV2>),
 }
 
 #[derive(Debug)]
@@ -249,7 +259,7 @@ pub fn parse(req: &Request, npcs: &'static [Npc]) -> Result<V1Request, Rejection
                 Ok(m) => m,
                 Err(reason) => return reject(reason),
             };
-            Op::Talk(Box::new(Talk::V2(talk)))
+            Op::Talk(Box::new(Talk::V2(Box::new(talk))))
         }
         ROUTE_RESULT => Op::Result,
         _ => Op::Cancel,
@@ -292,6 +302,13 @@ fn parse_v2_metadata(req: &Request) -> Option<TalkV2> {
         faction_name: name(req, "fname", MAX_NAME),
         player_faction_name: name(req, "pfname", MAX_NAME),
         location_name: name(req, "lname", MAX_NAME),
+        wars: match req.param("wars") {
+            None => None,
+            Some(_) => Some(uint("wars").filter(|&w| w <= WARS_MAX)?),
+        },
+        ruler_name: name(req, "ruler", MAX_NAME),
+        spouse_name: name(req, "spouse", MAX_NAME),
+        father_name: name(req, "father", MAX_NAME),
     };
     Some(TalkV2 {
         campaign: parse_id(req.param("camp"))?,

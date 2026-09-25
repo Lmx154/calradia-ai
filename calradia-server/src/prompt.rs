@@ -16,6 +16,7 @@ use crate::protocol::{
     TalkV2, ST_BETROTHED, ST_FACTION_LEADER, ST_IN_PARTY, ST_MARSHAL, ST_OTHER_PRISONER,
     ST_PLAYER_PRISONER, ST_PLAYER_RULER, ST_PLAYER_VASSAL, ST_SPOUSE,
 };
+use crate::realms::Realms;
 use std::fmt::Write as _;
 
 const SETTING: &str = "Calradia, the world of Mount&Blade: Warband. You know its six \
@@ -146,7 +147,7 @@ fn honor_word(honor: i32) -> &'static str {
 }
 
 /// The live game state as prose. Only facts the game sent are stated.
-fn situation(t: &TalkV2, player: &str) -> String {
+fn situation(t: &TalkV2, player: &str, realms: &Realms) -> String {
     let c = &t.context;
     let ids = ids::ids();
     let has = |bit: u32| c.status & bit != 0;
@@ -179,6 +180,9 @@ fn situation(t: &TalkV2, player: &str) -> String {
             ""
         };
         line(format!("You belong to {}{role}.", c.faction_name));
+        if !c.ruler_name.is_empty() && !has(ST_FACTION_LEADER) {
+            line(format!("Your liege is {}.", c.ruler_name));
+        }
     }
     if has(ST_IN_PARTY) {
         line(format!("You ride in {player}'s company."));
@@ -195,6 +199,12 @@ fn situation(t: &TalkV2, player: &str) -> String {
         line(format!("You are married to {player}."));
     } else if has(ST_BETROTHED) {
         line(format!("You are betrothed to {player}."));
+    }
+    if !c.spouse_name.is_empty() && !has(ST_SPOUSE) {
+        line(format!("You are married to {}.", c.spouse_name));
+    }
+    if !c.father_name.is_empty() {
+        line(format!("Your father: {}.", c.father_name));
     }
     let who = if c.player_female { "a woman" } else { "a man" };
     line(format!(
@@ -238,8 +248,50 @@ fn situation(t: &TalkV2, player: &str) -> String {
                 c.faction_relation
             )
         });
+        if let Some(wars) = c.wars {
+            let names = war_names(wars, c, realms);
+            line(if names.is_empty() {
+                "Your realm is at war with no other realm.".to_string()
+            } else {
+                format!("Your realm is at war with {}.", join_and(&names))
+            });
+        }
     }
     out
+}
+
+/// The realms in a `wars=` mask, by name.
+fn war_names(wars: u32, c: &crate::protocol::GameContext, realms: &Realms) -> Vec<String> {
+    let ids = ids::ids();
+    let first = ids
+        .factions
+        .index("fac_player_supporters_faction")
+        .expect("vanilla faction");
+    (0..7)
+        .filter(|bit| wars & (1 << bit) != 0)
+        .filter_map(|bit| ids.factions.name(first + bit))
+        .map(|id| match realms.get(id) {
+            Some(realm) => realm.name.clone(),
+            None if id == "fac_player_supporters_faction" => {
+                match ids.factions.name(c.player_faction) {
+                    Some(p) if p == id && !c.player_faction_name.is_empty() => {
+                        c.player_faction_name.clone()
+                    }
+                    _ => "a rebel realm".to_string(),
+                }
+            }
+            None => id.to_string(),
+        })
+        .collect()
+}
+
+/// "a", "a and b", "a, b and c".
+fn join_and(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 /// A character without a profile: who they are, from live data only.
@@ -257,9 +309,9 @@ fn generic_profile(t: &TalkV2) -> String {
     if let Some(rep) = reputation(c.reputation) {
         let _ = writeln!(out, "Personality: {rep}.");
     }
-    out += "No personal history has been written for you: do not invent a detailed past or \
-            family. Keep to your station and temperament.\nSpeaking style: as befits your \
-            station; brief and direct.";
+    out += "No personal history has been written for you: do not invent past deeds or \
+            relatives beyond those named below. Keep to your station, your realm's ways and \
+            your temperament.\nSpeaking style: as befits your station; brief and direct.";
     out
 }
 
@@ -310,7 +362,7 @@ fn memories(r: &Recall, player: &str) -> String {
 
 /// The chat for a v2 talk, within `MAX_PROMPT_CHARS`. `profile` is None when the character
 /// has no file; `recall` has already been bounded by memory::recall.
-pub fn v2_chat(t: &TalkV2, profile: Option<&Profile>, recall: &Recall) -> Chat {
+pub fn v2_chat(t: &TalkV2, profile: Option<&Profile>, realms: &Realms, recall: &Recall) -> Chat {
     let player = if t.context.player_name.is_empty() {
         "the player"
     } else {
@@ -321,7 +373,20 @@ pub fn v2_chat(t: &TalkV2, profile: Option<&Profile>, recall: &Recall) -> Chat {
         Some(p) => format!("You are {name}.\n{}", p.render()),
         None => generic_profile(t),
     };
-    let fixed = format!("{who}\n\nSetting: {SETTING}\n\n{}", situation(t, player));
+    let faction = ids::ids().factions.name(t.context.faction).unwrap_or("");
+    let lore = match realms.get(faction) {
+        Some(realm) => format!(
+            "\n\nWhat you know as one of the {} ({}):\n{}",
+            realm.people,
+            realm.name,
+            realm.render()
+        ),
+        None => String::new(),
+    };
+    let fixed = format!(
+        "{who}{lore}\n\nSetting: {SETTING}\n\n{}",
+        situation(t, player, realms)
+    );
     let mut r = Recall {
         current: recall.current.clone(),
         recent: recall.recent.clone(),
@@ -397,6 +462,22 @@ mod tests {
     use super::*;
     use crate::protocol::GameContext;
 
+    const SWADIA: &str = r#"
+id = "fac_kingdom_1"
+name = "Kingdom of Swadia"
+people = "Swadian"
+[canon]
+land = "Green hills and warhorses."
+sources = ["module_strings.py: journey_to_praven"]
+"#;
+    const KHERGITS: &str = r#"
+id = "fac_kingdom_3"
+name = "Khergit Khanate"
+people = "Khergit"
+[mod]
+culture = "Horse archers."
+"#;
+
     fn talk(character: &str) -> TalkV2 {
         let ids = ids::ids();
         TalkV2 {
@@ -424,6 +505,10 @@ mod tests {
                 faction_name: "Kingdom of Swadia".into(),
                 player_faction_name: String::new(),
                 location_name: "Praven".into(),
+                wars: None,
+                ruler_name: String::new(),
+                spouse_name: String::new(),
+                father_name: String::new(),
             },
             msg: "Hail.".into(),
         }
@@ -432,7 +517,7 @@ mod tests {
     #[test]
     fn situation_states_only_what_the_game_sent() {
         let t = talk("trp_knight_1_1");
-        let s = situation(&t, "Ylva");
+        let s = situation(&t, "Ylva", &Realms::default());
         for part in [
             "day 30",
             "You and Ylva are at Praven, a town.",
@@ -444,14 +529,69 @@ mod tests {
         ] {
             assert!(s.contains(part), "{part:?} missing from {s}");
         }
-        for absent in ["prisoner", "married", "company", "exile"] {
+        for absent in [
+            "prisoner",
+            "married",
+            "company",
+            "exile",
+            "liege",
+            "father",
+            "at war with",
+        ] {
             assert!(!s.contains(absent), "{absent} in {s}");
         }
     }
 
     #[test]
+    fn situation_names_liege_family_and_wars() {
+        let realms = Realms::from_toml(&[SWADIA, KHERGITS]);
+        let mut t = talk("trp_knight_1_1");
+        let c = &mut t.context;
+        c.status = 0;
+        c.ruler_name = "King Harlaus".into();
+        c.spouse_name = "Lady Ada".into();
+        c.father_name = "Count Old".into();
+        // Bits: 3 = fac_kingdom_3 (a file), 4 = fac_kingdom_4 (no file), 0 = the player's realm.
+        c.wars = Some(1 << 3 | 1 << 4 | 1);
+        c.player_faction = ids::ids()
+            .factions
+            .index("fac_player_supporters_faction")
+            .unwrap();
+        c.player_faction_name = "Ylvaland".into();
+        let s = situation(&t, "Ylva", &realms);
+        for part in [
+            "You belong to Kingdom of Swadia.\n- Your liege is King Harlaus.",
+            "You are married to Lady Ada.",
+            "Your father: Count Old.",
+            "Your realm is at war with Ylvaland, Khergit Khanate and fac_kingdom_4.",
+        ] {
+            assert!(s.contains(part), "{part:?} missing from {s}");
+        }
+        t.context.wars = Some(0);
+        t.context.status = ST_FACTION_LEADER;
+        let s = situation(&t, "Ylva", &realms);
+        assert!(
+            s.contains("at war with no other realm") && !s.contains("liege"),
+            "{s}"
+        );
+        // Realm lore follows the profile for members of a realm with a file.
+        let system = &v2_chat(&t, None, &realms, &Recall::default()).messages[0].1;
+        assert!(
+            system.contains(
+                "What you know as one of the Swadian (Kingdom of Swadia):\nLand: Green hills"
+            ),
+            "{system}"
+        );
+    }
+
+    #[test]
     fn generic_profile_uses_the_campaigns_reputation() {
-        let chat = v2_chat(&talk("trp_knight_1_1"), None, &Recall::default());
+        let chat = v2_chat(
+            &talk("trp_knight_1_1"),
+            None,
+            &Realms::default(),
+            &Recall::default(),
+        );
         let system = &chat.messages[0].1;
         assert!(
             system.starts_with(
@@ -459,7 +599,7 @@ mod tests {
             ),
             "{system}"
         );
-        assert!(system.contains("do not invent a detailed past"));
+        assert!(system.contains("do not invent past deeds or relatives beyond those named below"));
         assert!(system.contains("you remember no earlier conversation with Ylva"));
         assert_eq!(chat.messages.len(), 2);
         assert!(chat.fake_reply.contains("(no profile)"));

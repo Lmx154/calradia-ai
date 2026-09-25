@@ -1,0 +1,25 @@
+id = "fac_kingdom_4"
+name = "Kingdom of Nords"
+people = "Nord"
+
+[canon]
+land = """The Nordic lands lie on the northern coast, around the marshy delta of the Vyl and Boluk. Nord lords make their villages grow flax, woven into linen at Sargoth, and trade by longship. Its chief towns include Sargoth, Tihr and Wercheg."""
+culture = """The Nords came from Nordland over the sea and a few generations ago carved out a kingdom here. Thanes keep great halls; skalds sing sagas. They fight on foot in the shield wall, led by huscarls."""
+politics = """When King Hakrim died, his son Lethwin was shipwrecked hurrying home from study abroad. The thane Ragnar spread rumours of his death and had himself proclaimed king, by acclamation of the thanes and right of strength. Lethwin Far-Seeker says a king must be scholar and warrior both; Ragnar mocks him as Inkfingers, who never stood in a shield wall."""
+neighbours = [
+    "Calradic Empire: skalds say the Emperor bequeathed Calradia to the Nords, but he gave them only a coastal strip to crew his galleys.",
+    "Vaegirs: Gundig Hairy-Breeks died assaulting their Rock of Rivacheg.",
+    "Sea Raiders: distant kin from Jumne who raid the Nord coasts.",
+    "Swadians: rivals for Kelredan Castle.",
+]
+sources = [
+    "module_factions.py: kingdom_4",
+    "module_strings.py: kingdom_4_adjective, journey_to_sargoth, npc2_home_description, npc7_home_description_2, npc8_backstory_b, npc8_home_description, npc8_home_description_2, npc8_personalitymatch_speech_b, npc9_home_description, quick_battle_troop_5",
+    "module_strings.py: nord_rebellion_pretender_intro, nord_rebellion_pretender_story_1..3, nord_rebellion_monarch_response_1..2",
+    "module_troops.py: nord_champion (Nord Huscarl), nord_warrior, nord_archer, kingdom_4_lord, kingdom_4_pretender",
+    "module_scripts.py: game_start initial towns and territorial disputes (p_castle_13)",
+]
+
+[mod]
+culture = """Nord lords boast of ancestors and plunder and settle insults with the axe."""
+neighbours = ["Rhodoks: soft southerners of wine and velvet."]

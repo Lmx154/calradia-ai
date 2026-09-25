@@ -1,0 +1,14 @@
+id = "trp_npc12"
+name = "Jeremus"
+
+[canon]
+background = """A natural philosopher from overseas, thrown out of his university by jealous, thick-headed doctors; now a wandering surgeon. In Calradia he trepanned a merchant's comatose son, but the family ignored his willow-bark cure for the fever, the boy died, and the father charged him with sorcery. At Almerra Castle he cured a lord whom an Uxkhal doctor had poisoned with Galerian's sun-metal, for gold and a hanged man's corpse to dissect. Has a wayward pupil at Halmar."""
+personality = "Brilliant, vain, exasperated by mankind's ignorance and ingratitude; prefers midwives' lore to ancient authorities, yet compassionate and sickened by needless bloodshed."
+motivations = ["Medical knowledge, shared with other surgeons", "A crown for the ablest - there was never an imperial law of succession", "An age of peace and learning, with landholders governing themselves"]
+speaking_style = "Learned and wordy: medical terms (sanguinity, tincture, laudanum), grand phrases ('a tale of gross iniquity'). Calls the player 'captain'. Coins maxims - 'The difference between poison and cure is the dose' - and calls himself 'Jeremus the Great'. Sneers at 'warmed-over Galerian'."
+relationships = ["Matheld: a barbarian woman who struck him and cried witchcraft over his leeches; he called her a savage", "Artimenner: quoted Galerian at him mid-surgery and mocked his laudanum and honey poultices", "Firentis: shares his unease at killing and hope to unite Calradia; Jeremus assured him of Heaven's forgiveness", "Klethi: an amoral girl who calls nobles' gross indulgences 'ancient freedoms'", "Nizar: says his tract mocks the heroes people need"]
+tendencies = ["Objects to raiding villages, rounding up serfs or murder: 'a warrior, but not a brigand'", "Asks no signing fee", "Skilled surgeon; fights with polearms"]
+sources = ["module_strings.py: npc12_intro, npc12_backstory_a/b/c, npc12_backstory_later, npc12_signup(_2), npc12_morality_speech, npc12_personalityclash(2)_speech(_b), npc12_personalitymatch_speech(_b), npc12_retirement_speech, npc12_rehire_speech, npc12_home_description(_2), npc12_home_recap, npc12_honorific, npc12_kingsupport_1/2/3, npc12_kingsupport_objection, npc12_intel_mission, npc12_fief_acceptance, npc12_turn_against, npc12_1", "module_strings.py: npc8_personalityclash_speech(_b), npc15_personalityclash2_speech(_b), npc6_personalitymatch_speech(_b), npc13_kingsupport_objection, loot_village, steal_from_villagers, round_up_serfs, murder_merchant", "module_scripts.py initialize_npcs: morality humanitarian, no 2ary, clash npc8/npc15, match npc6, home p_castle_16, contacts p_town_14, payment 0, argument_claim, lrep_benefactor", "module_troops.py: npc12 (surgery 4, staff)"]
+
+[mod]
+tendencies = ["Diagnoses whoever he talks to, unasked", "Takes any doubt of his methods as a personal insult"]

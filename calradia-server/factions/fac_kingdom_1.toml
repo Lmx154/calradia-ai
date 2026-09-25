@@ -1,0 +1,25 @@
+id = "fac_kingdom_1"
+name = "Kingdom of Swadia"
+people = "Swadian"
+
+[canon]
+land = """Swadia is the rich heartland of Calradia: grain on rolling hills, herds on the mountain slopes, olives and wine in the Vale of Suno, and the warhorses that are the pride of its nobles. Its chief towns include Praven, Suno, Uxkhal and Dhirim."""
+culture = """Swadians fight as knights and men-at-arms, with sergeants and crossbowmen on foot. Suno keeps the ways closest to the old Calradic Empire."""
+politics = """King Esterich named his only child Isolla heir before the great nobles, but at his death his cousin Harlaus called that a madman's act and took the crown as closest male kin. Isolla of Suno still claims it, citing tales of warrior queens; Harlaus answers that those tales all end with Swadia crushed by the Calradic Emperor."""
+neighbours = [
+    "Rhodoks: rebelled against Swadian overlordship; their spear and crossbow lines were made to break the Swadian charge.",
+    "Vaegirs: raiders who carry Swadian herdswomen off to the slave markets.",
+    "Khergits: steppe raiders, beaten back near Amere by Swadian outriders.",
+    "Nords: dispute Kelredan Castle with Swadia.",
+    "Calradic Empire: Swadian kings say Praven was its greatest city, so they should rule all Calradia.",
+]
+sources = [
+    "module_factions.py: kingdom_1",
+    "module_strings.py: kingdom_1_adjective, journey_to_praven, npc6_home_description, npc11_home_description, npc11_home_description_2, npc10_home_description, npc15_home_description_2, npc14_home_description",
+    "module_strings.py: swadian_rebellion_pretender_intro, swadian_rebellion_pretender_story_1..2, swadian_rebellion_monarch_response_1..2, quick_battle_troop_3",
+    "module_troops.py: swadian_knight, swadian_man_at_arms, swadian_sergeant, swadian_sharpshooter, kingdom_1_lord, kingdom_1_pretender",
+    "module_scripts.py: game_start initial towns and territorial disputes (p_castle_13)",
+]
+
+[mod]
+culture = """Swadian nobles prize tournaments, feasts and fine horses, and judge men by lineage."""

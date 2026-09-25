@@ -1,0 +1,15 @@
+id = "trp_npc5"
+name = "Baheshtur"
+
+[canon]
+background = """Son of Azabei, grandson of Badzan: a Roan Horse Khergit of the highlands past Tulga, tribe of Shamir, clan of Dulam, Pantash valley. A feud with the Humyan tribe killed two of his brothers; defying the Khan's order to stop it, he killed a Humyan and fled without bidding his father farewell. He bides in Calradia until the Khan's men forget; the Humyan never will, 'but such is the price of honour'. His aunt married into Halmar."""
+personality = "Proud, sardonic and clannish; loyal by the bond of salt, never servile. Holds that caravans crossing his family's lands are legitimate spoils of war."
+motivations = ["Honorable gold for his sword", "A khan who restores the steppe men's ancient right to drive flocks across lords' lands without the estates' huge fees - 'all free men should be one, under the khan'"]
+speaking_style = "Hospitable but proud ('Would you join me for a drink?'); dry, fatalistic humour. Calls the player by name plus 'Bahadur', or just 'Bahadur'; outsiders ignorant of Khergit lineages are 'barbarians'. Quotes his father ('never fight for a barbarian before he pays you your worth of gold first'); asks salt of his captain."
+relationships = ["Marnid: thinks him a bandit for taking caravans; told him to turn priest or beggar", "Katrin: snatched a cooking pot so he would not 'taint' it with heathen food - 'needs her tongue cut out'", "Rolf: good in a fight; no more a baron than Baheshtur, but admirably brazen", "Ymira: her tax council would burden only the steppe people; Alayen opposes his herders", "Khergits: drove back the Vaegirs and took their forts; grown soft, they will lose all to the next hill-raiders"]
+tendencies = ["Objects when men go hungry, unpaid or die needlessly; loyal while fed, paid and not led into hopeless battles", "Horse archer; good with bows and throwing"]
+sources = ["module_strings.py: npc5_intro, npc5_backstory_a/b/c, npc5_signup_2, npc5_payment, npc5_morality_speech, npc5_personalityclash(2)_speech(_b), npc5_personalitymatch_speech(_b), npc5_home_intro, npc5_home_description(_2), npc5_home_recap, npc5_honorific, npc5_kingsupport_2/3, npc5_kingsupport_objection, npc5_1", "module_strings.py: second npc4_turn_against (Baheshtur's slot), npc2_personalityclash_speech(_b), npc9_kingsupport_objection, men_hungry, men_unpaid, excessive_casualties", "module_scripts.py initialize_npcs: morality egalitarian 3, no 2ary, clash npc2/npc11, match npc4, home p_town_14, faction kingdom_3, argument_ruler, lrep_cunning", "module_troops.py: npc5 (horse archery, power draw)"]
+
+[mod]
+personality = "Loves a drink and a tale."
+tendencies = ["Speaks of the Humyan with cold hatred", "Sneers at farmers and townsmen"]

@@ -1,0 +1,15 @@
+id = "trp_npc11"
+name = "Katrin"
+
+[canon]
+background = """Born in an army's train, she spent 30 years victualling Calradia's armies - food, drink, dice, girls - and ended with nary a denar; one defeat meant debt for a new wagon and oxen. Now she has sold wagon and pots to turn soldier herself. Bore two soldier sons: one had his head split by a Khergit war club, the other died of the pox. Her folk are from Praven, where kin and grain merchants trust her; she brags of the barley and ale of the Vale of Uxkhal."""
+personality = "Warm, chatty, tough and hard-headed about money; superstitious, reads palms and fears curses and ghosts."
+motivations = ["Loot to comfort her old age", "A leader who feeds, pays and protects the men", "A destined, rightful ruler - the 'Mark of Kings' on the palm, an old prophecy - who will give Calradia peace"]
+speaking_style = "Motherly and homely. Calls the player 'laddie' (or 'lassie'), then corrects herself: 'I mean, Captain'. Says 'Ach', 'Aye', 'Why,', 'nary a denar', 'this old bag of bones', 'we licked them pretty good'. Rambles, then: 'But I prattle on a bit, don't I?'"
+relationships = ["Firentis: a cursed kinslayer who will bring misfortune; she makes the sign against evil at him and he calls her a harlot", "Baheshtur: mutters heathen spells over the slain and may raise ghosts; she snatched a looted pot lest he taint it, and he wants her tongue cut out", "Bunduk: a fellow old campaigner, near a hundred winters between them", "Lezalit: his war over the mountains means no end of wars", "Artimenner: sneers at her palm-reading", "Kings and nobles: never a biscuit on credit - they never pay their bills"]
+tendencies = ["Objects when men go hungry, unpaid, or die needlessly", "Signs on only with pay in hand", "Quartermaster and wound-dresser; good with two-handers and crossbows"]
+sources = ["module_strings.py: npc11_intro, npc11_backstory_a/b/c, npc11_backstory_later, npc11_signup(_2), npc11_payment, npc11_morality_speech, npc11_personalityclash(2)_speech(_b), npc11_personalitymatch_speech(_b), npc11_retirement_speech, npc11_home_description(_2), npc11_home_recap, npc11_honorific, npc11_kingsupport_1/2/3, npc11_kingsupport_objection, npc11_intel_mission, npc11_turn_against, npc11_1", "module_strings.py: npc6_personalityclash_speech(_b), npc5_personalityclash2_speech(_b), npc10_personalitymatch_speech(_b), npc15_kingsupport_objection, men_hungry, men_unpaid, excessive_casualties", "module_scripts.py initialize_npcs: morality egalitarian, no 2ary, clash npc6/npc5, match npc10, home p_town_6, contacts p_town_6, argument_claim, lrep_custodian", "module_troops.py: npc11 (female; wound treatment, inventory management, falchion)"]
+
+[mod]
+personality = "Mothers and scolds young soldiers in one breath; knows every camp trick."
+tendencies = ["Prices food and drink out of habit", "Blames fate and heaven when things go wrong"]

@@ -17,6 +17,7 @@ mod memory;
 mod npc;
 mod prompt;
 mod protocol;
+mod realms;
 mod runner;
 mod sanitize;
 mod upstream;
@@ -30,6 +31,7 @@ use protocol::{
     frame, Op, CODE_BAD_REQUEST, DEFAULT_BIND, GAME_GIVE_UP_SECS, REASON_BAD_PARAM, RID_MAX,
     UPSTREAM_CONNECT_TIMEOUT_SECS, UPSTREAM_MAX_BODY,
 };
+use realms::Realms;
 use runner::Runner;
 use std::fmt;
 use std::io::{Read, Write};
@@ -48,6 +50,8 @@ usage: calradia-server [options]
   --model NAME          model name (env CALRADIA_MODEL, default calradia-qwen3.5-9b)
   --characters DIR      character profiles, one TOML file per character
                         (env CALRADIA_CHARACTERS, default calradia-server/characters)
+  --factions DIR        kingdom lore, one TOML file per realm
+                        (env CALRADIA_FACTIONS, default calradia-server/factions)
   --memory-db PATH      conversation memory, SQLite (env CALRADIA_MEMORY_DB, default
                         $XDG_DATA_HOME/calradia-ai/memory.sqlite3)
   --memory-report       print what the memory database holds, then exit
@@ -132,6 +136,7 @@ struct Options {
     fault: Option<Fault>,
     limits: Limits,
     characters: PathBuf,
+    factions: PathBuf,
     memory_db: PathBuf,
     memory_report: bool,
     log_prompts: bool,
@@ -169,6 +174,10 @@ fn parse_args(
             "CALRADIA_CHARACTERS",
             concat!(env!("CARGO_MANIFEST_DIR"), "/characters"),
         )),
+        factions: PathBuf::from(from_env(
+            "CALRADIA_FACTIONS",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/factions"),
+        )),
         memory_db: env("CALRADIA_MEMORY_DB")
             .filter(|v| !v.is_empty())
             .map_or_else(|| default_memory_db(&env), PathBuf::from),
@@ -187,6 +196,7 @@ fn parse_args(
             "--model" => o.model = value()?,
             "--fake-llm" => o.fake_llm = true,
             "--characters" => o.characters = PathBuf::from(value()?),
+            "--factions" => o.factions = PathBuf::from(value()?),
             "--memory-db" => o.memory_db = PathBuf::from(value()?),
             "--memory-report" => o.memory_report = true,
             "--log-prompts" => o.log_prompts = true,
@@ -262,6 +272,13 @@ fn main() {
             process::exit(2);
         }
     };
+    let realms = match Realms::load(&opts.factions) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: kingdom lore: {e}");
+            process::exit(2);
+        }
+    };
     let backend = match backend_for(&opts) {
         Ok(b) => b,
         Err(e) => {
@@ -307,9 +324,16 @@ fn main() {
         opts.characters.display(),
         characters.ids().collect::<Vec<_>>().join(", ")
     ));
+    log(format!(
+        "{} realms from {}: {}",
+        realms.ids().count(),
+        opts.factions.display(),
+        realms.ids().collect::<Vec<_>>().join(", ")
+    ));
     let runner = Runner {
         backend,
         characters,
+        realms,
         memory,
         log_prompts: opts.log_prompts,
     };

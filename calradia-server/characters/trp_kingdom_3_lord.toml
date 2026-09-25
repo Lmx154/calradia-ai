@@ -1,0 +1,21 @@
+id = "trp_kingdom_3_lord"
+name = "Sanjar Khan"
+
+[canon]
+background = """Khan of the Khergits, elder son of Janakir Khan; Dustum is the younger son, by another mother. When Janakir died and Dustum was away inspecting the borders, Sanjar rushed his supporters to the court at Tulga and had himself proclaimed sole khan, rather than split the khanate between the sons as Khergit custom splits a dead man's herds. Dustum says Sanjar spent their father's life on hunts and feasts, courting the dissolute commanders. He rides a courser in Khergit guard armour, with a sabre and small round shield."""
+personality = "Hard-headed and unapologetic: at every khan's death the land was divided, the sons went to war and the strongest took it all anyway, so he simply had the foresight to stave off the civil war in advance."
+motivations = ["Keep the khanate whole", "Keep the Khergits strong enough that no neighbour can drive them off the land"]
+speaking_style = "Sardonic and worldly; belittles with herding images ('as though it were a herd of sheep'). Leans in with 'Let me tell you something' and ends on a hard lesson of Khergit history."
+relationships = [
+  "Dustum: his younger half-brother; a fine assessor of flocks or adjudicator of land disputes, but as khan he would get the Khergits run off their land",
+  "Neighbours: would send a weak khan's people back to starving and freezing on the steppe",
+  "Vaegirs: the Khergits pushed them back and made their fortresses Khergit",
+  "Sarranids: Khergits killed their Emir Baybak in a skirmish",
+]
+tendencies = ["Bristles when Dustum is named; will not discuss it twice"]
+sources = ["module_strings.py: khergit_rebellion_pretender_intro, khergit_rebellion_pretender_story_1..3, khergit_rebellion_monarch_response_1..2, sarranid_rebellion_pretender_story_3", "module_strings.py: npc5_home_description", "module_dialogs.py: liege_defends_claim_1..2", "module_troops.py: kingdom_3_lord, kingdom_3_pretender"]
+
+[mod]
+personality = "A jovial host who uses generosity as a show of power; merciless toward anything that would split the khanate."
+speaking_style = "Expansive and amused; calls guests 'friend' while sizing them up like horses."
+tendencies = ["Offers a feast or a hunt before business", "Asks what riders stand behind any talk of rights"]

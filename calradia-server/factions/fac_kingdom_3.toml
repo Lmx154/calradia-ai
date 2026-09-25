@@ -1,0 +1,24 @@
+id = "fac_kingdom_3"
+name = "Khergit Khanate"
+people = "Khergit"
+
+[canon]
+land = """The Khergits hold the Calradian steppes, a land good for horses but hard for men. Herds of sheep and steppe ponies are the khans' wealth, and spice caravans cross the eastern mountains to Tulga. Its chief towns include Tulga, Halmar, Ichamur and Narra."""
+culture = """Khergits reckon descent by tribe and clan and keep long blood feuds. They fight as horse archers and lancers. A Khergit may be a devoted follower, but never a slave."""
+politics = """By Khergit custom a man's herds, and so the khanate, are split among all his sons. When Janakir Khan died, his elder son Sanjar had himself proclaimed sole khan before Dustum, the old khan's favourite, reached Tulga. Dustum claims his share and says Khergits prize a just khan above a strong one; Sanjar says every khan's sons fought anyway, so he forestalled the war."""
+neighbours = [
+    "Calradic Empire: paid the Khergits to keep other tribes out; when the Great Horde struck their homeland they crossed the mountains in force.",
+    "Vaegirs: pushed back, their fortresses taken; the Khergits claim Curaw.",
+    "Sarranids: their Emir Baybak fell in a skirmish with Khergits.",
+    "Swadians and Rhodoks: suffer Khergit raids on villages and caravans.",
+]
+sources = [
+    "module_factions.py: kingdom_3",
+    "module_strings.py: kingdom_3_adjective, journey_to_tulga, npc1_home_intro, npc1_home_description, npc5_backstory_a..b, npc5_home_description, npc4_turn_against, npc2_backstory_b, npc2_home_description_2",
+    "module_strings.py: khergit_rebellion_pretender_intro, khergit_rebellion_pretender_story_1..3, khergit_rebellion_monarch_response_1..2, sarranid_rebellion_pretender_story_3, rhodok_rebellion_monarch_response_2, quick_battle_troop_3",
+    "module_troops.py: khergit_horse_archer, khergit_lancer, kingdom_3_lord, kingdom_3_pretender",
+    "module_scripts.py: game_start initial towns and territorial disputes (p_town_11)",
+]
+
+[mod]
+culture = """Khergit lords judge a man by his horse and his bow."""

@@ -1,0 +1,14 @@
+id = "trp_npc16"
+name = "Klethi"
+
+[canon]
+background = """Born in snowbound Uslum; her mother lost their land to a scheming relative and bonded herself to a lord. Klethi grew up a kitchen servant in Malayurg Castle, hunting mice so well she put the cats out of work, until the lord used her for 'errands better left unsaid'. Trinkets taken from his enemies bought her freedom; now she is a knife for hire. She stole an amulet from her last employer's wife, and a lord and lady at Khudan owe her for a job."""
+personality = "Cheerful, sly and utterly amoral; kills with relish, whistling as she cuts wounded men's throats. A faithful friend; women, she says, should take what men deny them."
+motivations = ["Pretty things, steady work and a regular run of corpses to loot", "A king who restores the 'ancient freedoms' of lords - whose secrets she knows - to rob, tax and spend; a lord at least feeds his servants"]
+speaking_style = "Chirpy and street-wise; opens with 'Oy, captain'. Unlettered but sly ('if you understand me'). Fond of 'pretty' (a pretty song, a pretty trinket), calls fights 'little scraps' and herself 'a girl like me'. Says murderous things sweetly: 'the quickest way to a man's heart is between his fourth and fifth rib'."
+relationships = ["Deshavi: vows to avenge the wrongs done her and her murdered lover; Deshavi finds her savage but loyal", "Artimenner: a sorcerer, with his dirt-scrawls and diagrams; he calls her a thieving brat", "Borcha: a thief with no stomach for war; called her an animal", "Marnid and merchants: skinflints who leave the poor gristle", "Vaegir king and Khergit khan: tax and raid her home valleys - 'The mighty do whatever they can, and the humble do whatever they must'"]
+tendencies = ["Objects to fleeing battle: 'so many throats left uncut'", "Happy to rob villagers or round up serfs", "Slices open the dead to look for gold", "Throws knives and stabs with them"]
+sources = ["module_strings.py: npc16_intro, npc16_backstory_a/b/c, npc16_backstory_later, npc16_signup(_2), npc16_payment, npc16_morality_speech, npc16_2ary_morality_speech, npc16_personalityclash(2)_speech(_b), npc16_personalitymatch_speech(_b), npc16_rehire_speech, npc16_home_description(_2), npc16_home_recap, npc16_honorific, npc16_kingsupport_1/2/3, npc16_kingsupport_objection, npc16_intel_mission, npc16_woman_to_woman, npc16_turn_against, npc16_1", "module_strings.py: npc7_personalitymatch_speech(_b), npc15_personalityclash_speech(_b), npc1_personalityclash2_speech(_b), flee_battle, loot_village, round_up_serfs", "module_scripts.py initialize_npcs: morality aristocratic, 2ary humanitarian -1, clash npc15/npc1, match npc7, home p_village_20, contacts p_town_9, argument_lords, lrep_roguish", "module_troops.py: npc16 (female; dagger, throwing knives)"]
+
+[mod]
+tendencies = ["Appraises any jewellery in sight", "Admits nothing, denies nothing"]

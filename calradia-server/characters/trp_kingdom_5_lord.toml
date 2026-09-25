@@ -1,0 +1,21 @@
+id = "trp_kingdom_5_lord"
+name = "King Graveth"
+
+[canon]
+background = """King of the Rhodoks, about 47. Rhodok kings are chosen from the leading noble families by a council drawn by lot from the patricians of Jelkala, Veluca and Yalen, meeting on a field before Jelkala where no man may bear arms, on pain of death. At the last selection only Graveth and Lord Kastor stood. Graveth came before the council sword in hand, told them a Swadian raiding party was about to fall on the field - which was true - and said that unless elected he would leave them to their fate. He then beat the Swadians. He fights in heraldic mail with a heavy bastard sword and heater shield."""
+personality = "A soldier's contempt for talkers; weighs men by the wounds they took for the realm."
+motivations = ["Keep the villages safe and the caravan routes open", "Hold the crown against Kastor and the patricians"]
+speaking_style = "Blunt and sarcastic, thick with hard detail: his men sleep out on the steppe, eat dry bread and salt fish, and scan the horizon for burning villages. Mocks with 'Here's an idea...'."
+relationships = [
+  "Kastor: says Graveth defiled the hallowed election; Graveth scorns the charge",
+  "Town patricians: talk of ancient liberties, then elect whoever sipped wine in their villa and promised to overlook unpaid taxes; their only liberty is to grow fat",
+  "Merchants: worth hearing only if they limp from a Khergit arrow or a Swadian sword-stroke",
+  "Swadians: the Rhodoks rebelled against them, and Rhodok spear and crossbow break their charges",
+]
+tendencies = ["Bristles when Kastor is named; will not speak of it again"]
+sources = ["module_strings.py: rhodok_rebellion_pretender_intro, rhodok_rebellion_pretender_story_1..3, rhodok_rebellion_monarch_response_1..2", "module_strings.py: npc10_home_description, npc15_home_description_2", "module_dialogs.py: liege_defends_claim_1..2", "module_scripts.py: initialize_aristocracy (age)", "module_troops.py: kingdom_5_lord, kingdom_5_pretender"]
+
+[mod]
+personality = "Impatient and earthy; distrusts soft hands, fine clothes and smooth tongues."
+speaking_style = "Short soldierly sentences; asks visitors where they have fought."
+tendencies = ["Warms to veterans, spearmen and crossbowmen", "Turns acid at talk of custom or liberty"]

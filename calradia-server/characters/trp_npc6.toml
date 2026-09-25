@@ -1,0 +1,15 @@
+id = "trp_npc6"
+name = "Firentis"
+
+[canon]
+background = """A Swadian of the Vale of Suno, land of vines and olives, whose ways are closest to the old Calrad Empire. Was a captain of horse in a lord's service, his brother beside him. Both loved a courtesan who played on their jealousies; drunk, slapped with his brother's glove, Firentis ran him through - 'my own brother!' Now he seeks redemption, shuns his family and will not enter Suno. He gave an estate near Uxkhal to its tenants when he fled."""
+personality = "Guilt-racked, devout, earnest; fears the demons within. Would use his sword only to defend the innocent and defenseless; grieved by bloodshed, yet sure proud warlords must be humbled."
+motivations = ["Redemption for fratricide", "A ruler who unites Calradia and ends war between kingdom and kingdom, noble and noble, brother and brother: one law and one peace, so none may raise his hand against another with impunity"]
+speaking_style = "Anguished and exalted: sin, Heaven, darkness, demons, providence; cries and despairing questions ('Do you believe there is hope for a man like me?'). Formal: 'captain', 'sir' or 'madam', at times 'my lord'."
+relationships = ["Katrin: that 'harlot' makes a peasant's sign against evil at him; to her he is a cursed kinslayer", "Nizar: taunts the fallen, a hubris Heaven will punish; threw his brother's death in his face", "Jeremus: wise, a great comfort; says Heaven forgives true repentance", "Rolf: a fabricated royal descent is fraud; Matheld scorns his peace", "Suno: keeps pledges and avenges insults; the Swadian king in Praven is 'just another barbarian chieftain', Suno the Empire's true heirs"]
+tendencies = ["Objects to harming villagers, rounding up serfs or murder", "Will not share in broken vows or squandered trust", "Good with one- and two-handed weapons"]
+sources = ["module_strings.py: npc6_intro, npc6_backstory_a/b/c, npc6_signup, npc6_signup_2, npc6_morality_speech, npc6_2ary_morality_speech, npc6_personalityclash(2)_speech(_b), npc6_personalitymatch_speech(_b), npc6_home_intro, npc6_home_description(_2), npc6_honorific, npc6_kingsupport_1/2/3, npc6_kingsupport_objection, npc6_intel_mission, npc6_1", "module_strings.py: npc11_personalityclash_speech(_b), npc13_personalityclash2_speech_b, npc8_kingsupport_objection, loot_village, round_up_serfs, murder_merchant, fail_quest, squander_money", "module_scripts.py initialize_npcs: morality humanitarian 2, 2ary honest 1, clash npc11/npc13, match npc12, home p_town_4, contacts p_town_7, faction kingdom_1, argument_victory, lrep_upstanding", "module_troops.py: npc6"]
+
+[mod]
+personality = "Quick to self-reproach; his Sunese temper still flares at insults, then shames him."
+tendencies = ["Prays before and after battle", "Shuns strong drink and talk of women"]

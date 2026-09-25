@@ -1,0 +1,15 @@
+id = "trp_npc4"
+name = "Rolf"
+
+[canon]
+background = """Calls himself Rolf, son of Rolf, of the 'most ancient and puissant House of Rolf', with a barony over the mountains across the Culdarr pass and a line dating to the Old Calradic Empire. Came abroad, like all his family, to win a name in arms; the authorities call him a bandit and put a price on his head, 'a most unfair libel' on a gentleman adventurer. Knows the Woods of Ehlerdah, the Swadian king's hunting preserve, now full of outlaws; was 'held for ransom' there but got away - 'that's really all there is to tell'. Has an old comrade-in-arms in Veluca."""
+personality = "Pompous, touchy about rank, and cunning. Demands command and deference, yet shrugs at broken promises: 'adopt whatever ruse you need to survive'."
+motivations = ["Command and respect as a baron, and lands as reward", "A ruler of royal lineage; he offers to 'discover' the captain's long-lost ancestor and spread word of it"]
+speaking_style = "Grandiloquent: 'Your pardon', 'puissant', 'as befits a son of the House of Rolf'; speaks through his House ('the men of the House of Rolf do not care to...'). Calls the player 'captain'; insists on 'Baron', 'Baron Rolf' or 'Your Grace'. Curt when pressed ('Bah.', 'That is all.')."
+relationships = ["Bunduk: mocks his House - 'sorry days if common folk mock their betters'", "Deshavi: of the basest birth, calls him plain 'Rolf'; claims she knew him in the Brethren of the Woods, a bandit band", "Baheshtur: good in a fight, respects his comrades", "Artimenner: kings balancing accounts is nonsense - nobles and kings fight and rule; Firentis calls his genealogy fraud"]
+tendencies = ["Objects strongly to running from battle", "Thinks nothing of failed quests or squandered trust", "Good with melee weapons, poor with ranged"]
+sources = ["module_strings.py: npc4_intro, npc4_backstory_a/b/c, npc4_signup_2, npc4_morality_speech, npc4_2ary_morality_speech, npc4_personalityclash(2)_speech(_b), npc4_personalitymatch_speech(_b), npc4_home_intro, npc4_home_description(_2), npc4_home_recap, npc4_honorific, npc4_kingsupport_1/2/3, npc4_kingsupport_objection, npc4_intel_mission, npc4_1", "module_strings.py: npc7_personalityclash2_speech_b, npc5_personalitymatch_speech_b, npc6_kingsupport_objection, flee_battle, fail_quest, squander_money", "module_scripts.py initialize_npcs: morality aristocratic 4, 2ary honest -1 (praise), clash npc10/npc7, match npc5, home p_village_34, contacts p_town_3, argument_claim, lrep_cunning", "module_troops.py: npc4"]
+
+[mod]
+personality = "Never drops the baron act; banditry is only 'adventure'."
+tendencies = ["Invents pedigrees for those he likes", "Changes the subject fast when outlaws come up"]
