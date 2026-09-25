@@ -56,23 +56,31 @@ Each claim below is tagged with how it was established:
 **Concurrency** **[static]**
 - The response body is collected in one global buffer (`curl_return_data`) **without a
   lock**. Two requests in flight at the same time can corrupt each other.
-- **Rule: at most one request in flight.** The mod enforces this with
-  `$calradia_ai_request_pending`.
+- **Rule: at most one request in flight.** The mod enforces this with a single send
+  site, `script_cai_tx_send`, which sends only when `$cai_tx_rid` is 0. See
+  `docs/protocol-v1.md`.
 
 ## Protocol used by CalradiaAI
 
-- **Request:** `GET http://127.0.0.1:8766/<route>`, with data in the query string. Port
-  8766 is used because 8765 was taken on the development machine.
-- **Response body:** `<status>|<message>`. Status `1` means OK, and anything else is an
-  error. The message must not contain `|`, CR or LF.
+Milestone 1 used a simple `<status>|<message>` reply. Milestone 2 replaced it with the
+protocol in [`protocol-v1.md`](protocol-v1.md): `R|C|T|R` frames, random request and job
+ids, submit/poll/cancel jobs, and one sanitizer.
 
-The response script (`mods/calradia_ai/overlay/module_scripts.py`) handles three cases:
+## Findings from in-game tests (Milestone 2, 2026-09-25)
 
-| Case | What the script sees | In-game message |
-|---|---|---|
-| Success | `reg0 == 1` and at least one string | green "Server replied: …" |
-| Server-reported error | a string, but `reg0 != 1` | red "Server reported an error: …" |
-| Transport failure | empty body (`reg0 = 0`, no strings) | red "The server could not be reached." |
+- **Placeholders inside substituted text are expanded again.** **[live]**
+  - A player message containing `{s0}` reached the server with `{s0}` replaced by the
+    contents of string register s0. A `^` became a newline.
+  - So braces and carets that the player types are interpreted by the engine, in both
+    the request and the "You:" line.
+  - This can only insert other text registers into the message, never change game state,
+    and the server sanitizes whatever arrives.
+  - Vanilla has no string operation to escape braces, so this is a known limitation.
+- **The simple text box delivers its text as the player types.** Clicking Say without
+  pressing Enter sends the current text. **[live]**
+- **Logical cancel works as designed.** The owed `/v1/cancel` arrived about 0.6 s after
+  the talk, the job became CANCELED, and the model's late result was discarded.
+  **[live]**
 
 ## Limitations to design around in later milestones
 
@@ -96,8 +104,8 @@ separate decision.
 
 ## Test tools
 
-- `calradia-server/`: a Rust server with no dependencies. Routes: `/ping`, `/echo?msg=`,
-  `/slow?ms=`, `/error`, `/close`.
-  - Run it with `cargo run --release --manifest-path calradia-server/Cargo.toml`.
-  - Run its tests with `cargo test --manifest-path calradia-server/Cargo.toml`.
-- **Hung-server test:** any listener that accepts a connection and never writes a reply.
+- `calradia-server --fault {hang,close,empty,wrong-rid,malformed,delay,oversize-N,nonascii}`
+  injects transport and protocol failures. It prints a loud banner when a fault is on.
+- `calradia-server --fake-llm` answers in character without calling a model.
+- `cargo test --offline --manifest-path calradia-server/Cargo.toml` runs the automated
+  suite, which uses a fake upstream.

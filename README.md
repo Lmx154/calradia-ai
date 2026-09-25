@@ -181,18 +181,31 @@ how they share names. They are deliberately not reorganized into a package.
 
 ## CalradiaAI mod
 
-`mods/calradia_ai/overlay/` holds the files that differ from vanilla. Each is a complete
-copy of the vanilla file with small, marked edits:
+CalradiaAI lets you talk to an NPC whose replies come from a local language model.
+**Camp → Talk with Hrodvar.** opens a conversation window. Type a message, click **Say**,
+and Hrodvar, a Nord sellsword riding with your company, answers in character.
+
+It has three parts:
+
+**The game mod** is in `mods/calradia_ai/overlay/`. Each file is a complete copy of the
+vanilla file with small edits marked `# --- Calradia AI`:
 
 | File | Change |
 |---|---|
-| `module_game_menus.py` | Adds two camp-menu options: "Contact the Calradia AI server." and "Stop waiting…" |
-| `module_scripts.py` | Implements `script_game_receive_url_response` |
-| `variables.txt` | The full list of vanilla global variables with the mod's one variable appended at the end, so every vanilla variable keeps its index |
+| `module_game_menus.py` | Adds the "Talk with Hrodvar." camp option. |
+| `module_presentations.py` | Adds the `cai_talk` conversation window at the end of the list. |
+| `module_scripts.py` | Adds the protocol constants, `cai_new_id`, `cai_tx_send` (the only place that sends requests) and `game_receive_url_response`. |
+| `ID_scripts.py`, `ID_presentations.py` | The regenerated ID files, so the build needs only one pass. |
+| `variables.txt` | The vanilla global variables, followed by the mod's `cai_*` variables in a fixed order. |
 
-Everything else in the compiled output stays vanilla. `tests/test_calradia_ai.py` checks
-this: files the mod doesn't touch must be byte-identical to vanilla, and in the rest the
-only allowed difference is renumbered quick strings.
+**The server** is `calradia-server/`, written in Rust. It runs jobs asynchronously
+(`/v1/talk`, `/v1/result`, `/v1/cancel`), so no HTTP request stays open while the model
+generates. It talks to an OpenAI-compatible endpoint, and the NPC registry is in
+`src/npc.rs`.
+
+**The model** is served by llama.cpp through llama-swap. The default is
+`calradia-qwen3.5-9b` (Qwen3.5 9B Uncensored, Q6_K) at `http://172.17.0.1:8080/v1`.
+Override them with `--upstream`/`CALRADIA_UPSTREAM` and `--model`/`CALRADIA_MODEL`.
 
 To run it:
 
@@ -203,9 +216,18 @@ uv run warband-build --overlay mods/calradia_ai/overlay -o "$GAME/Modules/Calrad
 cargo run --release --manifest-path calradia-server/Cargo.toml   # listens on 127.0.0.1:8766
 ```
 
-In game, choose **Camp → Contact the Calradia AI server.** See
-[`docs/http-ipc.md`](docs/http-ipc.md) for the verified engine behavior (asynchronous
-GET, no timeout, one request at a time) and the reply protocol.
+Start a **new game**. Saves from older mod versions are not supported.
+
+Further reading:
+- [`docs/protocol-v1.md`](docs/protocol-v1.md): the game↔server contract.
+- [`docs/http-ipc.md`](docs/http-ipc.md): the verified engine HTTP behavior and in-game
+  findings.
+
+Known limitations:
+- Messages are ASCII only, at most 300 characters.
+- `{ }` and `^` in messages are interpreted by the engine.
+- Replies are capped at 500 characters.
+- There is one NPC and no memory between messages.
 
 ## Tests and linting
 
@@ -224,7 +246,7 @@ uv run ruff format --check .
 | `test_serialization.py` | Operand encoding (`$global`, `:local`, `@quick string`, tagged IDs, negative and large ints), opmask and opcode values, identifier escaping, `%f` float formatting, and integer division rounding down for negative numbers. |
 | `test_identifiers.py` | IDs such as `trp_player == 0` stay stable, and every generated ID file equals the reference. |
 | `test_module_data.py` | The Module_data output is byte-identical to the reference. |
-| `test_calradia_ai.py` | The CalradiaAI overlay builds in one pass. Only the mod's menu options and response script change, vanilla global variables keep their indices, and every other difference is a renumbered quick string. |
+| `test_calradia_ai.py` | The CalradiaAI overlay builds in one pass. Vanilla output is preserved (untouched files are byte-identical, and vanilla scripts and presentations are an unchanged prefix). There is a single send site, the mod's code uses only whitelisted operations, the URL templates follow the protocol rules, and the protocol constants match `calradia-server/src/protocol.rs`. |
 | `test_driver_unit.py` | The driver's own logic, tested against a small fake module (fixpoint, error detection, guards, publishing). |
 
 Ruff applies the full rule set to `src/` and `tests/`. For the legacy `game/` tree, it
