@@ -1,0 +1,291 @@
+{
+  "description": "Python 2.7.18 Linux reference build of the unmodified TaleWorlds Mount&Blade Warband Module System 1.171",
+  "upstream_commit": "1c213ba",
+  "upstream_paths": [
+    "mb_warband_module_system_1171/Module_system 1.171",
+    "mb_warband_module_system_1171/Module_data 1.171"
+  ],
+  "upstream_zip": "mb_warband_module_system_1171.zip",
+  "upstream_zip_sha256": "b8d5095031ed2b9df0a4020097bea06b6137022a52cd24a9d5c6b575444b16e1",
+  "docker_image": "python:2.7.18-slim@sha256:6c1ffdff499e29ea663e6e67c9b6b9a3b401d554d2c9f061f9a45344e3992363",
+  "python": "2.7.18 (default, Apr 20 2020, 19:34:11) [GCC 8.3.0]",
+  "source_edit": "module_info.py: export_dir = \"/export/\" (inside the container only)",
+  "stages": [
+    "process_init.py",
+    "process_global_variables.py",
+    "process_strings.py",
+    "process_skills.py",
+    "process_music.py",
+    "process_animations.py",
+    "process_meshes.py",
+    "process_sounds.py",
+    "process_skins.py",
+    "process_map_icons.py",
+    "process_factions.py",
+    "process_items.py",
+    "process_scenes.py",
+    "process_troops.py",
+    "process_particle_sys.py",
+    "process_scene_props.py",
+    "process_tableau_materials.py",
+    "process_presentations.py",
+    "process_party_tmps.py",
+    "process_parties.py",
+    "process_quests.py",
+    "process_info_pages.py",
+    "process_scripts.py",
+    "process_mission_tmps.py",
+    "process_game_menus.py",
+    "process_simple_triggers.py",
+    "process_dialogs.py",
+    "process_global_variables_unused.py",
+    "process_postfx.py"
+  ],
+  "module_data_scripts": [
+    "Flora_kinds.py",
+    "Ground_specs.py",
+    "Skyboxes.py"
+  ],
+  "files": {
+    "module_data_1171/flora_kinds.txt": {
+      "sha256": "c76197c9c71137a0519d5ee1c53719f3eaab941da28d9b8da79b6c0052838bcf",
+      "size": 6951
+    },
+    "module_data_1171/ground_spec_codes.h": {
+      "sha256": "eb4f051f1a6188c08aea073f696b5cd6c6c660633ed81d5baabe5934bc08da46",
+      "size": 328
+    },
+    "module_data_1171/ground_specs.txt": {
+      "sha256": "421f6ad2a28372232928df73ab9675d48fbe14e50b8cbb247a8d539e6a95f8b2",
+      "size": 755
+    },
+    "module_data_1171/header_ground_types.py": {
+      "sha256": "ea9f1470fcec230fb209ec0cfdb7ce7829aeaadf5fbfefec876ce367294b8320",
+      "size": 205
+    },
+    "module_data_1171/skyboxes.txt": {
+      "sha256": "d54d14421cad47379b0a04d371ec230e59328cdb5aefc7eed811e0e0f1624a04",
+      "size": 2380
+    },
+    "module_system_1171/export/actions.txt": {
+      "sha256": "c318db54b3edf18239fb95d621e79b10698f1554da4c24c93be03b62a82f5c8d",
+      "size": 67330
+    },
+    "module_system_1171/export/conversation.txt": {
+      "sha256": "a7f59e214b54dede2f7b475f5fcee2309dd205e507a034e0440a52f13a14e545",
+      "size": 861146
+    },
+    "module_system_1171/export/dialog_states.txt": {
+      "sha256": "6b7140b022947b021568b7fc541aba2efae3fe4229d130204f03052f75561403",
+      "size": 36366
+    },
+    "module_system_1171/export/factions.txt": {
+      "sha256": "a24fe075f0a87c743e77a24709c96b9224c27d213cafa98e7e3b37f4e228d630",
+      "size": 13231
+    },
+    "module_system_1171/export/info_pages.txt": {
+      "sha256": "c346c003814a5c5b1b23d278543dbb01d67c708ef968c7c28f1e78afabdbf729",
+      "size": 13772
+    },
+    "module_system_1171/export/item_kinds1.txt": {
+      "sha256": "f4652aa0a33f3ba3f59261472db76b335e93840d5ebdb9fd7c4fb6d6764b3167",
+      "size": 96583
+    },
+    "module_system_1171/export/map_icons.txt": {
+      "sha256": "4119207dcfc29e6aba0472d955c32a7da693cf34f5824fed8db0f320bd0bb484",
+      "size": 9872
+    },
+    "module_system_1171/export/menus.txt": {
+      "sha256": "594f8a8768b2b4632689e044f8ddafdcefd7251621564de5ab12cbe4fbe9ce28",
+      "size": 300800
+    },
+    "module_system_1171/export/meshes.txt": {
+      "sha256": "a7491052941c53f006de56f8a1ec1862be30143953a0290c98ab1b93ad6aa43c",
+      "size": 66399
+    },
+    "module_system_1171/export/mission_templates.txt": {
+      "sha256": "c125ffc89d475f7619d92d12971812dc249d74042b99dd4218e82b92ae8a57cc",
+      "size": 365066
+    },
+    "module_system_1171/export/music.txt": {
+      "sha256": "c8cb8b58ac6afc3233d3c2535af9bfc0be671991a132ca746a098ec8f8c1cb68",
+      "size": 2433
+    },
+    "module_system_1171/export/particle_systems.txt": {
+      "sha256": "4f15863737cd218ff9ef216df5f78aadd71479f8940ff35b96fdd03488fecc14",
+      "size": 22346
+    },
+    "module_system_1171/export/parties.txt": {
+      "sha256": "b89ccc66b2f30d9e73eb1ae1fda0dae0535d44ccc203dc38ae3b5003b504f98b",
+      "size": 32699
+    },
+    "module_system_1171/export/party_templates.txt": {
+      "sha256": "bdc9063aea427f40c59bdb03264e8fead32fe5a0573bdaef1e48313f603821f6",
+      "size": 5426
+    },
+    "module_system_1171/export/postfx.txt": {
+      "sha256": "dd895716b15b3d1af9c0309ad6e0b0d439d298ffc2fafba937a52f0ecb5630c4",
+      "size": 1199
+    },
+    "module_system_1171/export/presentations.txt": {
+      "sha256": "8f7c4b8aabe6e0514ac75d49b7e1792e9c4b004eb3f938ac83c2e72cfaf03795",
+      "size": 315996
+    },
+    "module_system_1171/export/quests.txt": {
+      "sha256": "d3d41d798de3f4fdff29f80b5453c18934f23495752cb12ed361c5ae06c6d1e7",
+      "size": 8794
+    },
+    "module_system_1171/export/quick_strings.txt": {
+      "sha256": "29d93477672d660a688edc7e15b2fa49f8fd6c0b323bc87406ad7842eabbaaf6",
+      "size": 58080
+    },
+    "module_system_1171/export/scene_props.txt": {
+      "sha256": "6cbcc879991232af1511cd7639b74cf716739172a944ad5a019b550473d38c39",
+      "size": 96421
+    },
+    "module_system_1171/export/scenes.txt": {
+      "sha256": "dbcd43ee301e3940f6ecf2e820211a7a85cec1e94c40d6f649068c30ff84a21c",
+      "size": 96353
+    },
+    "module_system_1171/export/scripts.txt": {
+      "sha256": "7dc945cd45b8d9d36ea1b71609e2c42e70fabf514a7103f7741bc62709f0c22c",
+      "size": 1162285
+    },
+    "module_system_1171/export/simple_triggers.txt": {
+      "sha256": "98daf6894f8ee8cee0abe0715c539daaa2137dcf0078e90ab4404f7c07ed8b51",
+      "size": 85017
+    },
+    "module_system_1171/export/skills.txt": {
+      "sha256": "6b363e901fc9433449d9100d70c336e04d98826f8420f394768f34cd7cfd566d",
+      "size": 4369
+    },
+    "module_system_1171/export/skins.txt": {
+      "sha256": "45a7d5f5b145b4494f23b64961731afe2eefd6e909d472606fd7c32ef7f2c28c",
+      "size": 5729
+    },
+    "module_system_1171/export/sounds.txt": {
+      "sha256": "f23fd844ed2a3ee6a68d0212dec14cbe140cb0dd89c0af831e5c7d7c1f6878c2",
+      "size": 17924
+    },
+    "module_system_1171/export/strings.txt": {
+      "sha256": "4c05b4b1375bffe5177d4f094005be9e95305acaba566a6f2e48a9049b073246",
+      "size": 473867
+    },
+    "module_system_1171/export/tableau_materials.txt": {
+      "sha256": "77d09d8b6a04155c60652aa905cbca07986f94c069b87890f569a2c69deb6dd4",
+      "size": 16763
+    },
+    "module_system_1171/export/tag_uses.txt": {
+      "sha256": "a1f856adee1d3ba51b81d3b74bd9904d735257018cb7805f44443777863b2c53",
+      "size": 26
+    },
+    "module_system_1171/export/triggers.txt": {
+      "sha256": "3b90668c85c3741e82714e998af8adf36cc499d5f38a8a6f72af2c87974c8711",
+      "size": 15139
+    },
+    "module_system_1171/export/troops.txt": {
+      "sha256": "efbfe7016d80a90f42247648ac23758f92ea54c7da0c697d950326f212c142cd",
+      "size": 561984
+    },
+    "module_system_1171/export/variable_uses.txt": {
+      "sha256": "5d16d55f0e0207279d774a2ae188f8c0578d9a87e4625d9d989fdb5b2bebce4c",
+      "size": 2764
+    },
+    "module_system_1171/export/variables.txt": {
+      "sha256": "f580ffc582a55b4873f4e6a97e0e843ebabd4dd979ea062e03e90851adf0a7b2",
+      "size": 35626
+    },
+    "module_system_1171/ids/ID_animations.py": {
+      "sha256": "2ceb0895d7e9bd944099530421816eced3db6bc319222a4245ce4f95c368cf01",
+      "size": 21851
+    },
+    "module_system_1171/ids/ID_factions.py": {
+      "sha256": "c68f4b5eb6de196221ade560ed541bb92767317a51169050044695480a773890",
+      "size": 696
+    },
+    "module_system_1171/ids/ID_info_pages.py": {
+      "sha256": "84ae13830e96f9310a8f4a94431ef6feb5e2720a96b265d647671d9952879dc2",
+      "size": 119
+    },
+    "module_system_1171/ids/ID_items.py": {
+      "sha256": "b6a42ad5f553ceb14acabe02fb057ad6f0d47cd48911d74526ac5c65962c55bf",
+      "size": 15549
+    },
+    "module_system_1171/ids/ID_map_icons.py": {
+      "sha256": "e9f970a760244e70a8c8a52977f583c593a891298613d2bcab4927ffb7e24c4d",
+      "size": 4055
+    },
+    "module_system_1171/ids/ID_menus.py": {
+      "sha256": "638dd991d7801543a3aea9644dfa0ab8474d3a7d4a1e1e9600b15c7c75424f1d",
+      "size": 7462
+    },
+    "module_system_1171/ids/ID_meshes.py": {
+      "sha256": "4d7307d5c7b47789d3ee5c48e73bdfbc5fc864464fa5cc341cf4ab867c4585dc",
+      "size": 14259
+    },
+    "module_system_1171/ids/ID_mission_templates.py": {
+      "sha256": "738d7e2472325e59bc18dc5c9584e18dbb5d3e46b4c929232cf0cf400c28a5bd",
+      "size": 1334
+    },
+    "module_system_1171/ids/ID_music.py": {
+      "sha256": "bf703f59b447b5d27cc4baa9173bfef9e680f7c5d3ff1b9e9c53606eddef0e86",
+      "size": 1996
+    },
+    "module_system_1171/ids/ID_particle_systems.py": {
+      "sha256": "7086b19d5497e9ba3721993aed36e6a361761012c58849c8d839f45cdad9c1f1",
+      "size": 1515
+    },
+    "module_system_1171/ids/ID_parties.py": {
+      "sha256": "7525e5a913827459ed772eef7c884d362e82a4d34a58b9d5e3f016736ba698b0",
+      "size": 4571
+    },
+    "module_system_1171/ids/ID_party_templates.py": {
+      "sha256": "fa0a5d1966b76193adc79764e119dcf2d67ff22127e7963d7ad13369d4bdc920",
+      "size": 1678
+    },
+    "module_system_1171/ids/ID_postfx_params.py": {
+      "sha256": "db1774b9d925f4e2d0cea7a49e25a547ecf18c0b44d929d2605382ee6c1f9afb",
+      "size": 150
+    },
+    "module_system_1171/ids/ID_presentations.py": {
+      "sha256": "be2eeedb432db66f93c5027b78b27a59ea24d4c5890426caed23cb14d6901743",
+      "size": 1798
+    },
+    "module_system_1171/ids/ID_quests.py": {
+      "sha256": "95ffbd81b93a349b679ca33750a1ff069121da4245ca23d6aa535b165a54d63f",
+      "size": 6671
+    },
+    "module_system_1171/ids/ID_scene_props.py": {
+      "sha256": "9d10883cf80e63bf483c66ffd6e7d0795656d9e3405a41d4acc096d9e46a1f54",
+      "size": 26456
+    },
+    "module_system_1171/ids/ID_scenes.py": {
+      "sha256": "e21ea92d72854e04f042d10ced1155a3fbea1f9c10b995459c27d959811b4d4b",
+      "size": 13887
+    },
+    "module_system_1171/ids/ID_scripts.py": {
+      "sha256": "406c34f75ac78eafa70d25c66cd71ce2464d2a184fa6574854e2145b59631d83",
+      "size": 26282
+    },
+    "module_system_1171/ids/ID_skills.py": {
+      "sha256": "2cc1e0729336236797434aaf0f82df600299a3a9d8e8775501609342b4f482b1",
+      "size": 841
+    },
+    "module_system_1171/ids/ID_sounds.py": {
+      "sha256": "2925fb1886c7d61e4bc7d667852be6f70c06e6ce9f3d21e2f9cbce0a24d6d947",
+      "size": 5299
+    },
+    "module_system_1171/ids/ID_strings.py": {
+      "sha256": "a01f3492116824e72f400a23236725edb52f501ac2a30636c1340bbdb65a58b2",
+      "size": 157933
+    },
+    "module_system_1171/ids/ID_tableau_materials.py": {
+      "sha256": "6dc38768eae0b4b0773d11c267eebd95036ab4649505f9791685e3eccb10bebe",
+      "size": 1792
+    },
+    "module_system_1171/ids/ID_troops.py": {
+      "sha256": "dbea584d08320498aafd304e76c138813dbf39ce43369ac96e07e1380380693c",
+      "size": 30621
+    }
+  }
+}
