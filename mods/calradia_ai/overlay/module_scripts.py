@@ -14,6 +14,37 @@ from header_map_icons import *
 from header_presentations import *
 from ID_animations import *
 
+# --- Calradia AI (milestone 2) constants; see docs/protocol-v1.md ---
+# Protocol version (v= in every URL), response codes (the C field of the "R|C|T|R"
+# frame) and the game's give-up time.
+# mirrors calradia-server/src/protocol.rs
+CAI_PROTOCOL_VERSION = 1
+CAI_CODE_READY = 0
+CAI_CODE_PENDING = 1
+CAI_CODE_FAILED = 2
+CAI_CODE_CANCELED = 3
+CAI_CODE_BAD_REQUEST = 4
+CAI_CODE_UNKNOWN_JOB = 5
+CAI_CODE_BUSY = 6
+CAI_GAME_GIVE_UP_SECS = 120
+
+# Game side only (module_presentations.py imports these too).
+CAI_NPC_HRODVAR = 1        # npc= sent with /v1/talk
+CAI_OP_TALK = 1            # ops of script_cai_tx_send
+CAI_OP_RESULT = 2
+CAI_OP_CANCEL = 3
+CAI_CONV_IDLE = 0          # $cai_conv_state
+CAI_CONV_SUBMITTING = 1    # talk sent, no answer yet
+CAI_CONV_PENDING = 2       # server accepted the job; polling /v1/result
+CAI_CONV_READY = 3
+CAI_CONV_FAILED = 4
+CAI_CONV_CANCELED = 5
+CAI_ID_MODULUS = 900000000 # ids are 1..CAI_ID_MODULUS
+CAI_POLL_MS = 750
+CAI_GIVE_UP_MS = CAI_GAME_GIVE_UP_SECS * 1000 # longer than the server's 90 s job deadline
+CAI_STUCK_MS = 5000        # own request unanswered: tell the player to restart the server
+CAI_RESET_MS = 15000       # request older than this presentation: offer Reset
+# --- end Calradia AI ---
 
 ####################################################################################################################
 # scripts is a list of script records.
@@ -9247,24 +9278,96 @@ scripts = [
   # s0, s1, s2, ... up to 128 strings contain the string values
   ("game_receive_url_response",
     [
-      # Calradia AI (milestone 1). Reply protocol: "<status>|<message>", status 1 = ok.
-      # A failed request (connection refused, DNS, empty reply) still calls this script
-      # with an empty body, which the engine parses as num_integers=1, reg0=0, num_strings=0.
-      # HTTP status codes are ignored by the engine; the server puts status in the body.
+      # --- Calradia AI (milestone 2): the callback of docs/protocol-v1.md "Game state machine" ---
+      # A v1 frame "R|C|T|R" arrives as reg0 = R, reg1 = C, reg2 = R, s0 = T. A transport
+      # failure arrives as an empty body: num_integers = 1, reg0 = 0, num_strings = 0
+      # (docs/http-ipc.md). The registers are copied into locals first; s0 is copied into s67
+      # only when the frame is delivered. This script calls no other script.
       (store_script_param, ":num_integers", 1),
       (store_script_param, ":num_strings", 2),
-      (assign, "$calradia_ai_request_pending", 0),
+      (assign, ":rid", reg0),
+      (assign, ":code", reg1),
+      (assign, ":rid_echo", reg2),
+
+      # Well-formed (WF): three integers, one string, both rids equal and positive.
+      (assign, ":well_formed", 0),
       (try_begin),
-        (ge, ":num_integers", 1),
-        (eq, reg0, 1),
-        (ge, ":num_strings", 1),
-        (display_message, "@[Calradia AI] Server replied: {s0}", 0x80FF80),
-      (else_try),
-        (ge, ":num_strings", 1),
-        (display_message, "@[Calradia AI] Server reported an error: {s0}", 0xFF8080),
-      (else_try),
-        (display_message, "@[Calradia AI] The server could not be reached.", 0xFF8080),
+        (eq, ":num_integers", 3),
+        (eq, ":num_strings", 1),
+        (eq, ":rid", ":rid_echo"),
+        (gt, ":rid", 0),
+        (assign, ":well_formed", 1),
       (try_end),
+
+      # The outstanding request may change the conversation only if it is a talk/result for
+      # the conversation's current job and the conversation is still waiting for it.
+      # Anything else (a cancel, an older job, a canceled conversation) is stale.
+      (assign, ":for_conversation", 0),
+      (try_begin),
+        (neq, "$cai_tx_op", CAI_OP_CANCEL),
+        (eq, "$cai_tx_job", "$cai_conv_job"),
+        (is_between, "$cai_conv_state", CAI_CONV_SUBMITTING, CAI_CONV_PENDING + 1),
+        (assign, ":for_conversation", 1),
+      (try_end),
+
+      (try_begin),
+        # (a) Nothing outstanding: drop the frame.
+        (eq, "$cai_tx_rid", 0),
+      (else_try),
+        # (c) A stray reply to another request: drop it and keep the transport busy.
+        (eq, ":well_formed", 1),
+        (neq, ":rid", "$cai_tx_rid"),
+      (else_try),
+        # (b) The reply to our request: complete the transport, then deliver the frame.
+        (eq, ":well_formed", 1),
+        (assign, "$cai_tx_rid", 0),
+        (try_begin),
+          (eq, ":for_conversation", 1),
+          (str_store_string_reg, s67, s0),
+          (try_begin),
+            (eq, ":code", CAI_CODE_READY),
+            # s67 is Hrodvar's reply.
+            (assign, "$cai_conv_state", CAI_CONV_READY),
+            (assign, "$cai_reply_new", 1),
+          (else_try),
+            (eq, ":code", CAI_CODE_PENDING),
+            (assign, "$cai_conv_state", CAI_CONV_PENDING),
+          (else_try),
+            # Terminal: s67 becomes the player-facing reason (T is a reason token here).
+            (assign, "$cai_conv_state", CAI_CONV_FAILED),
+            (try_begin),
+              (eq, ":code", CAI_CODE_FAILED),
+              (str_store_string, s67, "@Hrodvar could not answer ({s67})."),
+            (else_try),
+              (eq, ":code", CAI_CODE_CANCELED),
+              (assign, "$cai_conv_state", CAI_CONV_CANCELED),
+              (str_store_string, s67, "@The server canceled this conversation ({s67})."),
+            (else_try),
+              (eq, ":code", CAI_CODE_BAD_REQUEST),
+              (str_store_string, s67, "@calradia-server refused the message ({s67})."),
+            (else_try),
+              (eq, ":code", CAI_CODE_UNKNOWN_JOB),
+              (str_store_string, s67, "@The server lost this conversation."),
+            (else_try),
+              (eq, ":code", CAI_CODE_BUSY),
+              (str_store_string, s67, "@calradia-server is busy; try again later."),
+            (else_try),
+              (str_store_string, s67, "@calradia-server sent an unknown answer ({s67})."),
+            (try_end),
+            (assign, "$cai_reply_new", 1),
+          (try_end),
+        (try_end),
+      (else_try),
+        # (d) Empty body (transport failure) or malformed frame: complete the transport as failed.
+        (assign, "$cai_tx_rid", 0),
+        (try_begin),
+          (eq, ":for_conversation", 1),
+          (assign, "$cai_conv_state", CAI_CONV_FAILED),
+          (str_store_string, s67, "@calradia-server could not be reached."),
+          (assign, "$cai_reply_new", 1),
+        (try_end),
+      (try_end),
+      # --- end Calradia AI ---
       ]),
       
   ("game_get_cheat_mode",
@@ -50786,4 +50889,73 @@ scripts = [
     ]),
    #INVASION MODE END
      
+  # --- Calradia AI (milestone 2): transport scripts; see docs/protocol-v1.md ---
+
+  # script_cai_new_id: a random rid or job id, (r1*30000 + r2 + ms) mod 900000000 + 1.
+  # INPUT: arg1 = presentation time in ms, arg2 = previous id (never returned)
+  # OUTPUT: reg0 = id in 1..900000000
+  ("cai_new_id",
+    [
+      (store_script_param, ":now_ms", 1),
+      (store_script_param, ":previous", 2),
+      (assign, ":id", ":previous"),
+      # Draw again while the id equals the previous one.
+      (try_for_range, ":unused_attempt", 0, 8),
+        (eq, ":id", ":previous"),
+        (store_random_in_range, ":r1", 0, 30000),
+        (store_random_in_range, ":r2", 0, 30000),
+        (store_mul, ":id", ":r1", 30000),
+        (val_add, ":id", ":r2"),
+        (val_add, ":id", ":now_ms"),
+        (val_mod, ":id", CAI_ID_MODULUS),
+        (val_add, ":id", 1),
+      (try_end),
+      # Eight equal draws in a row are practically impossible; stay correct anyway.
+      (try_begin),
+        (eq, ":id", ":previous"),
+        (val_mod, ":id", CAI_ID_MODULUS),
+        (val_add, ":id", 1),
+      (try_end),
+      (assign, reg0, ":id"),
+    ]),
+
+  # script_cai_tx_send: the only place that sends a request (send_message_to_url).
+  # Sends nothing while a request is outstanding ($cai_tx_rid != 0): the engine collects
+  # response bodies in one unlocked buffer, so at most one request may be in flight.
+  # INPUT: arg1 = op (CAI_OP_TALK, CAI_OP_RESULT or CAI_OP_CANCEL), arg2 = job id
+  #        For CAI_OP_TALK, s66 holds the player's message.
+  # The URL templates are the quick-string operands themselves, so that encode_url = 1
+  # percent-encodes every substituted value. Registers: reg60 = rid, reg61 = job,
+  # reg62 = npc, reg63 = day; s65 = player name (scratch), s66 = message.
+  ("cai_tx_send",
+    [
+      (store_script_param, ":op", 1),
+      (store_script_param, ":job", 2),
+      (try_begin),
+        (eq, "$cai_tx_rid", 0),
+        (is_between, ":op", CAI_OP_TALK, CAI_OP_CANCEL + 1),
+        (call_script, "script_cai_new_id", "$cai_now_ms", "$cai_tx_prev_rid"),
+        (assign, "$cai_tx_rid", reg0),
+        (assign, "$cai_tx_prev_rid", reg0),
+        (assign, "$cai_tx_op", ":op"),
+        (assign, "$cai_tx_job", ":job"),
+        (assign, "$cai_tx_sent_ms", "$cai_now_ms"),
+        (assign, "$cai_tx_inst", "$cai_prsnt_inst"),
+        (assign, reg60, "$cai_tx_rid"),
+        (assign, reg61, ":job"),
+        (try_begin),
+          (eq, ":op", CAI_OP_TALK),
+          (assign, reg62, CAI_NPC_HRODVAR),
+          (store_current_day, reg63),
+          (str_store_troop_name, s65, "trp_player"),
+          (send_message_to_url, "@http://127.0.0.1:8766/v1/talk?v=1&rid={reg60}&job={reg61}&npc={reg62}&day={reg63}&pname={s65}&msg={s66}&end=1", 1),
+        (else_try),
+          (eq, ":op", CAI_OP_RESULT),
+          (send_message_to_url, "@http://127.0.0.1:8766/v1/result?v=1&rid={reg60}&job={reg61}&end=1", 1),
+        (else_try),
+          (send_message_to_url, "@http://127.0.0.1:8766/v1/cancel?v=1&rid={reg60}&job={reg61}&end=1", 1),
+        (try_end),
+      (try_end),
+    ]),
+  # --- end Calradia AI ---
 ]

@@ -3039,28 +3039,10 @@ game_menus = [
        [(jump_to_menu, "mnu_camp_cheat"),
         ],
        ),
-      # --- Calradia AI (milestone 1): HTTP round trip to the local calradia-server ---
-      # send_message_to_url runs asynchronously on an engine worker thread; the reply
-      # arrives later in script_game_receive_url_response. The engine keeps one shared,
-      # unlocked response buffer, so only one request may be in flight at a time.
-      ("calradia_ai_contact",[(neq, "$calradia_ai_request_pending", 1)],"Contact the Calradia AI server.",
-       [
-         (assign, "$calradia_ai_request_pending", 1),
-         (str_store_string, s0, "@http://127.0.0.1:8766/ping"),
-         (send_message_to_url, s0, 0),
-         (display_message, "@[Calradia AI] Request sent to 127.0.0.1:8766, waiting for a reply..."),
-        ]
-       ),
-      # The engine sets no HTTP timeout: a hung server would never reply. Let the player give up.
-      # Menus are not redrawn when a reply arrives, so this option can still be on screen after
-      # the reply; choosing it then just redraws the menu.
-      ("calradia_ai_abandon",[(eq, "$calradia_ai_request_pending", 1)],"Stop waiting for the Calradia AI server.",
-       [
-         (try_begin),
-           (eq, "$calradia_ai_request_pending", 1),
-           (assign, "$calradia_ai_request_pending", 0),
-           (display_message, "@[Calradia AI] No longer waiting for a reply."),
-         (try_end),
+      # --- Calradia AI (milestone 2): talk with an NPC through the local calradia-server ---
+      # The conversation lives in prsnt_cai_talk; see docs/protocol-v1.md.
+      ("cai_talk",[],"Talk with Hrodvar.",
+       [(start_presentation, "prsnt_cai_talk"),
         ]
        ),
       # --- end Calradia AI ---

@@ -1,152 +1,389 @@
-//! Calradia AI IPC proof-of-concept HTTP server (std only, no dependencies).
+//! calradia-server: the bridge between the Calradia AI Warband mod and a language model.
 //!
-//! The Mount&Blade Warband engine reaches this server through libcurl when a module
-//! script runs `(send_message_to_url, <string>, <encode_url>)`. The engine splits the
-//! response body on '|' into integers (reg0..) and strings (s0..), so every body here
-//! is a '|'-separated record. Every request is logged in full to stdout, because the
-//! exact method and headers the engine sends are not yet known.
-//!
-//! Usage: `calradia-server [--bind ADDR:PORT]` (default 127.0.0.1:8766).
-//!
-//! Routes (matched on the decoded path; any method):
-//! - `/`, `/ping`   200 `1|Hello from the Calradia AI server!`
-//! - `/echo?msg=..` 200 `1|<msg>` ('|', CR, LF become spaces; max 200 bytes)
-//! - `/slow?ms=..`  sleeps `ms` (default 5000, max 120000), then answers like `/ping`
-//! - `/error`       500 `0|server error test`
-//! - `/close`       reads the request, then closes without any response
-//! - anything else  404 `0|not found`
+//! It implements protocol v1 (docs/protocol-v1.md). The game sends
+//! `GET /v1/{talk,result,cancel}?...` through the engine's `send_message_to_url`, and
+//! every answer is HTTP 200 with the body `R|C|T|R`. Replies come from an
+//! OpenAI-compatible upstream (`POST {upstream}/chat/completions`), run one at a time by
+//! a single worker thread, so no `/v1` handler ever waits on the model.
 
 mod http;
+mod jobs;
+mod npc;
+mod prompt;
+mod protocol;
+mod sanitize;
+mod upstream;
 
 use http::{format_response, read_request, Request};
-use std::io::Write;
+use jobs::{Limits, Store};
+use npc::Npc;
+use protocol::{
+    frame, Op, CODE_BAD_REQUEST, DEFAULT_BIND, GAME_GIVE_UP_SECS, REASON_BAD_PARAM, RID_MAX,
+    UPSTREAM_CONNECT_TIMEOUT_SECS, UPSTREAM_MAX_BODY,
+};
+use std::fmt;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, process, thread};
+use upstream::{Backend, Canned, DEFAULT_MODEL, DEFAULT_UPSTREAM};
 
-const DEFAULT_BIND: &str = "127.0.0.1:8766";
-const HELLO: &str = "1|Hello from the Calradia AI server!";
-const LOG_BODY_MAX: usize = 1024;
-const ECHO_MAX: usize = 200;
+const USAGE: &str = "\
+usage: calradia-server [options]
+  --bind ADDR:PORT      listen address (default 127.0.0.1:8766)
+  --upstream URL        OpenAI-compatible base URL, http only
+                        (env CALRADIA_UPSTREAM, default http://172.17.0.1:8080/v1)
+  --model NAME          model name (env CALRADIA_MODEL, default calradia-qwen3.5-9b)
+  --fake-llm            skip the upstream; answer a canned reply after 1.5 s
+  --fault MODE          misbehave on purpose on /v1/*, for testing the game:
+                        hang, close, empty, wrong-rid, malformed, delay,
+                        oversize-N, nonascii
+  --max-jobs N          stored jobs (default 64)
+  --queue-len N         queued jobs (default 8)
+  --ttl-secs N          lifetime of finished jobs (default 600)
+  --deadline-secs N     job deadline, below 120 (default 90)";
 
-fn main() {
-    let bind = match parse_args(env::args().skip(1)) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("error: {e}\nusage: calradia-server [--bind ADDR:PORT]");
-            process::exit(2);
-        }
-    };
-    let listener = match TcpListener::bind(&bind) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("error: cannot listen on {bind}: {e}");
-            process::exit(1);
-        }
-    };
-    log(&format!("calradia-server listening on {bind}"));
-    serve(listener);
+/// How long a client may take to send its request.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long `--fake-llm` and the text faults take to "think".
+const FAKE_LLM_DELAY: Duration = Duration::from_millis(1500);
+/// How long `--fault delay` holds each /v1 answer.
+const FAULT_DELAY: Duration = Duration::from_secs(3);
+
+/// A deliberate misbehaviour for testing the game (`--fault`). Requests are still
+/// processed normally; the fault only changes what goes back on the wire, except for
+/// `Oversize` and `NonAscii`, which replace the model's reply.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Fault {
+    /// Accept, then never reply.
+    Hang,
+    /// Close without replying.
+    Close,
+    /// 200 with an empty body.
+    Empty,
+    /// Echo rid+1 in both R positions.
+    WrongRid,
+    /// Reply `garbage|x`.
+    Malformed,
+    /// Reply after 3 s.
+    Delay,
+    /// READY text of N characters before sanitizing.
+    Oversize(usize),
+    /// READY text full of non-ASCII.
+    NonAscii,
 }
 
-fn parse_args(mut args: impl Iterator<Item = String>) -> Result<String, String> {
-    let mut bind = DEFAULT_BIND.to_string();
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--bind" => bind = args.next().ok_or("--bind needs ADDR:PORT")?,
+impl fmt::Display for Fault {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Fault::Hang => write!(f, "hang: /v1 requests are accepted and never answered"),
+            Fault::Close => write!(f, "close: /v1 connections are closed without a reply"),
+            Fault::Empty => write!(f, "empty: /v1 answers are 200 with an empty body"),
+            Fault::WrongRid => write!(f, "wrong-rid: /v1 answers carry rid+1"),
+            Fault::Malformed => write!(f, "malformed: /v1 answers are `garbage|x`"),
+            Fault::Delay => write!(f, "delay: /v1 answers are held for 3 s"),
+            Fault::Oversize(n) => write!(f, "oversize-{n}: replies are {n} characters"),
+            Fault::NonAscii => write!(f, "nonascii: replies are full of non-ASCII"),
+        }
+    }
+}
+
+fn parse_fault(s: &str) -> Result<Fault, String> {
+    Ok(match s {
+        "hang" => Fault::Hang,
+        "close" => Fault::Close,
+        "empty" => Fault::Empty,
+        "wrong-rid" => Fault::WrongRid,
+        "malformed" => Fault::Malformed,
+        "delay" => Fault::Delay,
+        "nonascii" => Fault::NonAscii,
+        _ => match s.strip_prefix("oversize-").map(str::parse::<usize>) {
+            Some(Ok(n)) if (1..=UPSTREAM_MAX_BODY).contains(&n) => Fault::Oversize(n),
+            _ => return Err(format!("unknown fault {s:?}")),
+        },
+    })
+}
+
+#[derive(Debug, PartialEq)]
+struct Options {
+    bind: String,
+    upstream: String,
+    model: String,
+    fake_llm: bool,
+    fault: Option<Fault>,
+    limits: Limits,
+}
+
+/// Parses the command line; `env` looks up environment variables. `Ok(None)` means help
+/// was requested.
+fn parse_args(
+    mut args: impl Iterator<Item = String>,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<Option<Options>, String> {
+    let from_env = |name: &str, default: &str| {
+        env(name)
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| default.to_string())
+    };
+    let mut o = Options {
+        bind: DEFAULT_BIND.to_string(),
+        upstream: from_env("CALRADIA_UPSTREAM", DEFAULT_UPSTREAM),
+        model: from_env("CALRADIA_MODEL", DEFAULT_MODEL),
+        fake_llm: false,
+        fault: None,
+        limits: Limits::default(),
+    };
+    while let Some(flag) = args.next() {
+        let mut value = || args.next().ok_or_else(|| format!("{flag} needs a value"));
+        let count = |v: String| match v.parse::<u64>() {
+            Ok(n) if n >= 1 => Ok(n),
+            _ => Err(format!("{flag} needs a positive integer, got {v:?}")),
+        };
+        match flag.as_str() {
+            "--bind" => o.bind = value()?,
+            "--upstream" => o.upstream = value()?,
+            "--model" => o.model = value()?,
+            "--fake-llm" => o.fake_llm = true,
+            "--fault" => o.fault = Some(parse_fault(&value()?)?),
+            "--max-jobs" => o.limits.max_jobs = count(value()?)? as usize,
+            "--queue-len" => o.limits.queue_len = count(value()?)? as usize,
+            "--ttl-secs" => o.limits.ttl = Duration::from_secs(count(value()?)?),
+            "--deadline-secs" => {
+                let secs = count(value()?)?;
+                if secs >= GAME_GIVE_UP_SECS {
+                    return Err(format!(
+                        "--deadline-secs must be below the game's {GAME_GIVE_UP_SECS} s give-up"
+                    ));
+                }
+                o.limits.deadline = Duration::from_secs(secs);
+            }
+            "-h" | "--help" => return Ok(None),
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
-    Ok(bind)
+    Ok(Some(o))
 }
 
-/// Accepts connections forever, one thread per connection.
-fn serve(listener: TcpListener) {
+/// Chooses where replies come from: a canned text for the text faults and `--fake-llm`,
+/// otherwise the upstream.
+fn backend_for(o: &Options) -> Result<Backend, String> {
+    let canned = match o.fault {
+        Some(Fault::Oversize(n)) => Some(Canned::Oversize(n)),
+        Some(Fault::NonAscii) => Some(Canned::NonAscii),
+        _ if o.fake_llm => Some(Canned::Reply),
+        _ => None,
+    };
+    Ok(match canned {
+        Some(kind) => Backend::Canned {
+            delay: FAKE_LLM_DELAY,
+            kind,
+        },
+        None => Backend::Upstream {
+            endpoint: upstream::parse_endpoint(&o.upstream)?,
+            model: o.model.clone(),
+            connect_timeout: Duration::from_secs(UPSTREAM_CONNECT_TIMEOUT_SECS),
+        },
+    })
+}
+
+fn main() {
+    let opts = match parse_args(env::args().skip(1), |k| env::var(k).ok()) {
+        Ok(Some(o)) => o,
+        Ok(None) => {
+            println!("{USAGE}");
+            return;
+        }
+        Err(e) => {
+            eprintln!("error: {e}\n{USAGE}");
+            process::exit(2);
+        }
+    };
+    let backend = match backend_for(&opts) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: {e}");
+            process::exit(2);
+        }
+    };
+    let listener = match TcpListener::bind(&opts.bind) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("error: cannot listen on {}: {e}", opts.bind);
+            process::exit(1);
+        }
+    };
+    if let Some(fault) = opts.fault {
+        let bar = "!".repeat(72);
+        eprintln!(
+            "{bar}\n!!! FAULT INJECTION IS ON: --fault {fault}\n!!! This server misbehaves \
+             on purpose. Do not use it for normal play.\n{bar}"
+        );
+    }
+    let source = match &backend {
+        Backend::Upstream {
+            endpoint, model, ..
+        } => format!("upstream {endpoint} model {model}"),
+        Backend::Canned { kind, .. } => format!("canned replies ({kind:?}), no upstream"),
+    };
+    log(format!(
+        "calradia-server listening on {}; {source}; limits {:?}",
+        opts.bind, opts.limits
+    ));
+    if let Err(e) = start(listener, opts.limits, backend, opts.fault, npc::NPCS) {
+        eprintln!("error: {e}");
+        process::exit(1);
+    }
+}
+
+struct App {
+    store: Arc<Store>,
+    npcs: &'static [Npc],
+    fault: Option<Fault>,
+}
+
+/// Starts the worker, then accepts connections forever, one thread per connection.
+fn start(
+    listener: TcpListener,
+    limits: Limits,
+    backend: Backend,
+    fault: Option<Fault>,
+    npcs: &'static [Npc],
+) -> std::io::Result<()> {
+    let store = Arc::new(Store::new(limits));
+    jobs::spawn_worker(store.clone(), backend)?;
+    let app = Arc::new(App { store, npcs, fault });
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
-                thread::spawn(move || handle(stream));
+                let app = app.clone();
+                thread::spawn(move || handle(stream, &app));
             }
-            Err(e) => log(&format!("accept error: {e}")),
+            Err(e) => log(format!("accept error: {e}")),
+        }
+    }
+    Ok(())
+}
+
+/// The frame's parts, before the frame is built.
+struct Outcome {
+    rid: u32,
+    code: u8,
+    text: String,
+}
+
+impl App {
+    fn respond(&self, req: &Request) -> Outcome {
+        match protocol::parse_v1(req, self.npcs) {
+            Err(rejection) => Outcome {
+                rid: rejection.rid,
+                code: CODE_BAD_REQUEST,
+                text: rejection.reason.to_string(),
+            },
+            Ok(v1) => {
+                let answer = match v1.op {
+                    Op::Talk(talk) => self.store.talk(v1.job, talk),
+                    Op::Result => self.store.result(v1.job),
+                    Op::Cancel => self.store.cancel(v1.job),
+                };
+                Outcome {
+                    rid: v1.rid,
+                    code: answer.code,
+                    text: answer.text,
+                }
+            }
         }
     }
 }
 
-enum Reply {
-    Send(u16, String),
-    Close,
-}
-
-fn route(req: &Request) -> Reply {
-    match req.path.as_str() {
-        "/" | "/ping" => Reply::Send(200, HELLO.to_string()),
-        "/echo" => {
-            let msg = req.param("msg").unwrap_or("(no msg)");
-            let mut msg = msg.replace(['|', '\r', '\n'], " ");
-            let mut end = msg.len().min(ECHO_MAX);
-            while !msg.is_char_boundary(end) {
-                end -= 1;
-            }
-            msg.truncate(end);
-            Reply::Send(200, format!("1|{msg}"))
-        }
-        "/slow" => {
-            let ms = req.param("ms").and_then(|v| v.parse::<u64>().ok());
-            thread::sleep(Duration::from_millis(ms.unwrap_or(5000).min(120_000)));
-            Reply::Send(200, HELLO.to_string())
-        }
-        "/error" => Reply::Send(500, "0|server error test".to_string()),
-        "/close" => Reply::Close,
-        _ => Reply::Send(404, "0|not found".to_string()),
-    }
-}
-
-fn handle(mut stream: TcpStream) {
-    let peer = stream
-        .peer_addr()
-        .map_or_else(|_| "?".to_string(), |a| a.to_string());
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+fn handle(mut stream: TcpStream, app: &App) {
+    let _ = stream.set_read_timeout(Some(REQUEST_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(REQUEST_TIMEOUT));
     let req = match read_request(&mut stream) {
         Ok(r) => r,
-        Err(e) => return log(&format!("{peer} bad request: {e}; closing")),
+        Err(e) => {
+            log(format!("bad HTTP request: {e}"));
+            let body = frame(0, CODE_BAD_REQUEST, REASON_BAD_PARAM);
+            let _ = stream.write_all(&format_response(200, &body));
+            return;
+        }
     };
-    log(&describe(&peer, &req));
-    match route(&req) {
-        Reply::Close => log(&format!("{peer} {} -> closed without response", req.path)),
-        Reply::Send(status, body) => match stream.write_all(&format_response(status, &body)) {
-            Ok(()) => log(&format!("{peer} {} -> {status} {body:?}", req.path)),
-            Err(e) => log(&format!("{peer} {} -> write error: {e}", req.path)),
-        },
+    let started = Instant::now();
+    let out = app.respond(&req);
+    let mut body = frame(out.rid, out.code, &out.text);
+    let fault = app.fault.filter(|_| req.path.starts_with("/v1/"));
+    match fault {
+        Some(Fault::Hang) => {
+            log_request(&req, &body, started, "fault hang: holding the connection");
+            // Hold the connection until the client gives up.
+            let _ = stream.set_read_timeout(None);
+            let mut sink = [0u8; 256];
+            while matches!(stream.read(&mut sink), Ok(n) if n > 0) {}
+            return;
+        }
+        Some(Fault::Close) => {
+            return log_request(&req, &body, started, "fault close: closed without reply");
+        }
+        Some(Fault::Empty) => body.clear(),
+        Some(Fault::WrongRid) => body = frame(out.rid % RID_MAX + 1, out.code, &out.text),
+        Some(Fault::Malformed) => body = "garbage|x".to_string(),
+        Some(Fault::Delay) => thread::sleep(FAULT_DELAY),
+        Some(Fault::Oversize(_) | Fault::NonAscii) | None => {}
+    }
+    match stream.write_all(&format_response(200, &body)) {
+        Ok(()) => log_request(&req, &body, started, ""),
+        Err(e) => log_request(&req, &body, started, &format!("write error: {e}")),
     }
 }
 
-fn describe(peer: &str, req: &Request) -> String {
-    let mut s = format!(
-        "request from {peer}\n  {} {}\n  path: {:?}\n",
-        req.method, req.target, req.path
+/// One line per request: route, rid, job, the answer and the time taken. Player text is
+/// shown only as a preview.
+fn log_request(req: &Request, body: &str, started: Instant, note: &str) {
+    let param = |k: &str| req.param(k).map_or_else(|| "-".to_string(), preview);
+    let mut line = format!(
+        "{} {} rid={} job={}",
+        req.method,
+        req.path,
+        param("rid"),
+        param("job")
     );
-    for (k, v) in &req.query {
-        s += &format!("  query: {k:?} = {v:?}\n");
+    if req.path == protocol::ROUTE_TALK {
+        line += &format!(
+            " npc={} day={} msg={:?}",
+            param("npc"),
+            param("day"),
+            param("msg")
+        );
     }
-    for (k, v) in &req.headers {
-        s += &format!("  header: {k}: {v}\n");
+    if !req.body.is_empty() {
+        line += &format!(" (request body of {} bytes ignored)", req.body.len());
     }
-    let shown = &req.body[..req.body.len().min(LOG_BODY_MAX)];
-    s += &format!(
-        "  body ({} bytes): {:?}",
-        req.body.len(),
-        String::from_utf8_lossy(shown)
+    line += &format!(
+        " -> {:?} in {} ms",
+        preview(body),
+        started.elapsed().as_millis()
     );
-    s
+    if !note.is_empty() {
+        line += &format!(" [{note}]");
+    }
+    log(line);
 }
 
-/// Prints one timestamped block to stdout atomically and flushes.
-fn log(msg: &str) {
+/// At most 80 characters of `s`, marked with "..." if cut.
+fn preview(s: &str) -> String {
+    const MAX: usize = 80;
+    match s.char_indices().nth(MAX) {
+        Some((i, _)) => format!("{}...", &s[..i]),
+        None => s.to_string(),
+    }
+}
+
+/// Prints one timestamped line to stdout.
+fn log(msg: impl fmt::Display) {
     let t = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "[{}.{:03}] {msg}", t.as_secs(), t.subsec_millis());
-    let _ = out.flush();
+    println!("[{}.{:03}] {msg}", t.as_secs(), t.subsec_millis());
 }
 
 #[cfg(test)]
