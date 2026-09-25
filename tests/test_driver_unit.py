@@ -410,6 +410,119 @@ def test_source_without_bat_refused(tmp_path: Path) -> None:
         build(tmp_path / "src", tmp_path / "out", quiet=True)
 
 
+# --- overlay ------------------------------------------------------------------------------
+
+
+def make_overlay(root: Path, files: dict[str, str]) -> Path:
+    root.mkdir(parents=True)
+    for name, body in files.items():
+        (root / name).write_text(body)
+    return root
+
+
+def test_overlay_replaces_and_adds_files(
+    basic: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base_before = hash_tree(basic)
+    ovl = make_overlay(
+        tmp_path / "ovl",
+        {
+            "module_x.py": "VALUE = 7\n",
+            "ID_x.py": "x = 7\n",
+            "build_module.bat": "python process_use.py\r\npython process_extra.py\r\n",
+            "process_extra.py": PRELUDE + "open(EXPORT + 'extra.txt', 'w').write('added')\n",
+            "stale.pyc": "not python",
+        },
+    )
+    (ovl / "__pycache__").mkdir()
+    (ovl / "__pycache__" / "module_x.cpython-312.pyc").write_text("ignored")
+    out = tmp_path / "out"
+    result = build(basic, out, overlay=ovl)
+    assert result.passes == 1
+    assert (out / "use.txt").read_text() == "x=7\n"
+    assert (out / "extra.txt").read_text() == "added"
+    assert sorted(result.files) == ["extra.txt", "use.txt"]
+    assert result.ids_differ_from_source == []
+    assert hash_tree(basic) == base_before
+    stdout = capsys.readouterr().out
+    assert "overlay: 4 files (3 replaced, 1 added)" in stdout
+    assert "replaced: build_module.bat" in stdout
+    assert "added:    process_extra.py" in stdout
+    assert "stale.pyc" not in stdout
+
+
+def test_overlay_marker_fields(basic: Path, tmp_path: Path) -> None:
+    build(basic, tmp_path / "plain", quiet=True)
+    marker = json.loads((tmp_path / "plain" / mb.MARKER_NAME).read_text())
+    assert marker["overlay_dir"] is None
+    assert marker["overlay_files"] == []
+
+    ovl = make_overlay(tmp_path / "ovl", {"module_x.py": "VALUE = 1\n", "b_new.py": ""})
+    build(basic, tmp_path / "out", overlay=ovl, quiet=True)
+    marker = json.loads((tmp_path / "out" / mb.MARKER_NAME).read_text())
+    assert marker["overlay_dir"] == str(ovl.resolve())
+    assert marker["overlay_files"] == ["b_new.py", "module_x.py"]
+    assert marker["source_dir"] == str(basic.resolve())
+
+
+def test_overlay_with_subdir_refused(basic: Path, tmp_path: Path) -> None:
+    ovl = make_overlay(tmp_path / "ovl", {"module_x.py": "VALUE = 2\n"})
+    (ovl / "nested").mkdir()
+    with pytest.raises(GuardError, match="nested"):
+        build(basic, tmp_path / "out", overlay=ovl, quiet=True)
+    assert not (tmp_path / "out").exists()
+
+
+def test_overlay_missing_or_not_a_dir_refused(basic: Path, tmp_path: Path) -> None:
+    (tmp_path / "file").write_text("x")
+    for ovl in (tmp_path / "missing", tmp_path / "file"):
+        with pytest.raises(GuardError, match="overlay"):
+            build(basic, tmp_path / "out", overlay=ovl, quiet=True)
+    assert not (tmp_path / "out").exists()
+
+
+def test_overlay_inside_source_refused(basic: Path, tmp_path: Path) -> None:
+    for ovl in (make_overlay(basic / "ovl", {"module_x.py": "VALUE = 2\n"}), basic):
+        with pytest.raises(GuardError, match="inside the source dir"):
+            build(basic, tmp_path / "out", overlay=ovl, quiet=True)
+    assert not (tmp_path / "out").exists()
+
+
+def test_output_inside_overlay_refused(basic: Path, tmp_path: Path) -> None:
+    ovl = make_overlay(tmp_path / "ovl", {"module_x.py": "VALUE = 2\n"})
+    before = hash_tree(ovl)
+    for out in (ovl, ovl / "out"):
+        with pytest.raises(GuardError, match="inside the overlay dir"):
+            build(basic, out, overlay=ovl, quiet=True)
+    assert hash_tree(ovl) == before
+    assert not (ovl / "out").exists()
+
+
+def test_sync_ids_with_overlay_writes_into_overlay(
+    stale: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base_before = hash_tree(stale)
+    ovl = make_overlay(tmp_path / "ovl", {"module_x.py": "VALUE = 3\n"})
+    out = tmp_path / "out"
+
+    first = build(stale, out, overlay=ovl, quiet=True)
+    assert first.ids_differ_from_source == ["ID_x.py"]
+    assert "differ from the source dir + overlay: ID_x.py" in capsys.readouterr().err
+    assert sorted(p.name for p in ovl.iterdir()) == ["module_x.py"]
+
+    second = build(stale, out, overlay=ovl, sync_ids=True, quiet=True)
+    assert second.passes == 2
+    assert second.synced_ids == ["ID_x.py"]
+    assert (ovl / "ID_x.py").read_text() == "x = 3\n"
+    assert hash_tree(stale) == base_before
+
+    third = build(stale, out, overlay=ovl, quiet=True)
+    assert third.passes == 1
+    assert third.ids_differ_from_source == []
+    assert (out / "use.txt").read_text() == "x=3\n"
+    assert hash_tree(stale) == base_before
+
+
 # --- CLI ----------------------------------------------------------------------------------
 
 
@@ -426,3 +539,17 @@ def test_main_exit_codes(basic: Path, tmp_path: Path, capsys: pytest.CaptureFixt
     with pytest.raises(SystemExit) as info:
         main(["--bogus"])
     assert info.value.code == 2
+
+
+def test_main_overlay_option(
+    basic: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert mb.make_parser().parse_args([]).overlay is None
+    assert mb.make_parser().parse_args(["--overlay", "some/dir"]).overlay == Path("some/dir")
+    ovl = make_overlay(tmp_path / "ovl", {"module_x.py": "VALUE = 4\n", "ID_x.py": "x = 4\n"})
+    out = tmp_path / "out"
+    assert main(["--source-dir", str(basic), "-o", str(out), "--overlay", str(ovl), "-q"]) == 0
+    assert (out / "use.txt").read_text() == "x=4\n"
+    missing = str(tmp_path / "missing")
+    assert main(["--source-dir", str(basic), "-o", str(out), "--overlay", missing, "-q"]) == 2
+    assert "overlay dir not found" in capsys.readouterr().err

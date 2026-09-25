@@ -22,6 +22,13 @@ stage exits 0, no output line starts with ``ERROR``/``Error``, and the ``ID_*.py
 did not change during the pass. If a pass is not accepted but the IDs changed, another
 pass is run (at most ``MAX_PASSES``); if the IDs did not change, a rerun would repeat the
 same failure, so the build stops. Only an accepted pass is published to the output dir.
+
+With ``--overlay DIR`` a mod is defined as the base source tree plus a flat directory of
+replacement and additional files: after the source tree is copied into the work directory,
+every regular file at the top level of the overlay (``__pycache__`` and ``*.pyc`` ignored)
+is copied over it. The stage list is parsed from the work directory's ``build_module.bat``
+after overlaying, so an overlay may supply its own ``.bat`` to add stages. The base tree is
+never written; ``--sync-ids`` then writes changed ``ID_*.py`` files into the overlay.
 """
 
 from __future__ import annotations
@@ -197,12 +204,32 @@ def _is_native(path: Path) -> bool:
     return [p.lower() for p in path.parts[-2:]] == ["modules", "native"]
 
 
+def check_overlay_dir(overlay_dir: Path, source_dir: Path) -> tuple[Path, list[Path]]:
+    """Apply the overlay guards; return the resolved overlay dir and its files, by name."""
+    resolved = overlay_dir.expanduser().absolute().resolve()
+    if not resolved.is_dir():
+        raise GuardError(f"overlay dir not found or not a directory: {resolved}")
+    if _is_within(resolved, source_dir):
+        raise GuardError(f"overlay dir must not be inside the source dir: {resolved}")
+    subdirs = sorted(p.name for p in resolved.iterdir() if p.is_dir() and p.name != "__pycache__")
+    if subdirs:
+        raise GuardError(
+            f"overlay dir {resolved} must be flat; it contains subdirectories: {', '.join(subdirs)}"
+        )
+    files = sorted(
+        (p for p in resolved.iterdir() if p.is_file() and p.suffix != ".pyc"),
+        key=lambda p: p.name,
+    )
+    return resolved, files
+
+
 def check_output_dir(
     output_dir: Path,
     source_dir: Path,
     *,
     allow_native: bool = False,
     force: bool = False,
+    overlay_dir: Path | None = None,
 ) -> Path:
     """Apply the output guards; return the resolved output directory."""
     absolute = output_dir.expanduser().absolute()
@@ -213,6 +240,8 @@ def check_output_dir(
         raise GuardError(f"refusing to write inside the game sources: {resolved}")
     if _is_within(resolved, source_dir.resolve()):
         raise GuardError(f"refusing to write inside the source dir: {resolved}")
+    if overlay_dir is not None and _is_within(resolved, overlay_dir.resolve()):
+        raise GuardError(f"refusing to write inside the overlay dir: {resolved}")
     if resolved.exists():
         if not resolved.is_dir():
             raise GuardError(f"output path exists and is not a directory: {resolved}")
@@ -234,6 +263,16 @@ def work_tree(source_dir: Path, keep: bool) -> Iterator[Path]:
     finally:
         if not keep:
             shutil.rmtree(root, ignore_errors=True)
+
+
+def apply_overlay(work: Path, files: Sequence[Path]) -> tuple[list[str], list[str]]:
+    """Copy the overlay files into the work dir; return (replaced, added) names."""
+    replaced: list[str] = []
+    added: list[str] = []
+    for path in files:
+        (replaced if (work / path.name).exists() else added).append(path.name)
+        shutil.copy2(path, work / path.name)
+    return replaced, added
 
 
 def _git_provenance(source_dir: Path) -> dict[str, object]:
@@ -303,8 +342,13 @@ def build(
     force: bool = False,
     keep_work: bool = False,
     quiet: bool = False,
+    overlay: Path | None = None,
 ) -> BuildResult:
     """Compile the module in ``source_dir`` and publish the export files to ``output_dir``.
+
+    If ``overlay`` is given, its top-level files replace or extend the source tree in the
+    work dir; the stages are parsed from the overlaid ``build_module.bat``, and
+    ``sync_ids`` writes into the overlay dir instead of ``source_dir``.
 
     Raises GuardError for refused invocations and BuildError if no pass is accepted.
     """
@@ -317,14 +361,32 @@ def build(
     bat = source_dir / BAT_NAME
     if not bat.is_file():
         raise GuardError(f"{bat} not found (is --source-dir a Module System tree?)")
-    out = check_output_dir(output_dir, source_dir, allow_native=allow_native, force=force)
-    stages = parse_stages(bat)
-    if not stages:
-        raise GuardError(f"no process_*.py stages found in {bat}")
+    overlay_dir: Path | None = None
+    overlay_files: list[Path] = []
+    if overlay is not None:
+        overlay_dir, overlay_files = check_overlay_dir(overlay, source_dir)
+        if (overlay_dir / BAT_NAME).is_file():
+            bat = overlay_dir / BAT_NAME
+    out = check_output_dir(
+        output_dir, source_dir, allow_native=allow_native, force=force, overlay_dir=overlay_dir
+    )
 
     with work_tree(source_dir, keep_work) as work:
         if keep_work:
             log(f"work dir: {work}")
+        if overlay_dir is not None:
+            replaced, added = apply_overlay(work, overlay_files)
+            log(
+                f"overlay: {len(overlay_files)} files "
+                f"({len(replaced)} replaced, {len(added)} added)"
+            )
+            for name in replaced:
+                log(f"  replaced: {name}")
+            for name in added:
+                log(f"  added:    {name}")
+        stages = parse_stages(work / BAT_NAME)
+        if not stages:
+            raise GuardError(f"no process_*.py stages found in {bat}")
         log(f"building {source_dir} ({len(stages)} stages)")
         pass_results = _run_passes(work, stages, log)
         staging = work / "export"
@@ -368,6 +430,8 @@ def build(
         "generator": "modsys.build",
         "source_dir": str(source_dir),
         **_git_provenance(source_dir),
+        "overlay_dir": None if overlay_dir is None else str(overlay_dir),
+        "overlay_files": sorted(p.name for p in overlay_files),
         "python": sys.version,
         "passes": result.passes,
         "stages": stages,
@@ -387,20 +451,24 @@ def build(
     if result.stale:
         log(f"  not produced by this build (left in place): {', '.join(result.stale)}")
 
-    source_ids = snapshot_ids(source_dir)
-    result.ids_differ_from_source = diff_names(source_ids, final_ids)
+    input_ids = snapshot_ids(source_dir)
+    sync_dir, input_label = source_dir, "the source dir"
+    if overlay_dir is not None:
+        input_ids.update(snapshot_ids(overlay_dir))
+        sync_dir, input_label = overlay_dir, "the source dir + overlay"
+    result.ids_differ_from_source = diff_names(input_ids, final_ids)
     if sync_ids:
         for name in result.ids_differ_from_source:
             if name in final_ids:
-                _atomic_write(source_dir / name, final_ids[name])
+                _atomic_write(sync_dir / name, final_ids[name])
                 result.synced_ids.append(name)
         if result.synced_ids:
-            log(f"synced ID files into {source_dir}: {', '.join(result.synced_ids)}")
+            log(f"synced ID files into {sync_dir}: {', '.join(result.synced_ids)}")
         else:
-            log("ID files in the source dir are already up to date")
+            log(f"ID files in {input_label} are already up to date")
     elif result.ids_differ_from_source:
         print(
-            "notice: regenerated ID files differ from the source dir: "
+            f"notice: regenerated ID files differ from {input_label}: "
             f"{', '.join(result.ids_differ_from_source)} (rerun with --sync-ids to update them)",
             file=sys.stderr,
         )
@@ -428,7 +496,13 @@ def make_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--sync-ids",
         action="store_true",
-        help="copy regenerated ID_*.py files back into the source dir",
+        help="copy regenerated ID_*.py files back into the source dir (or the overlay dir)",
+    )
+    p.add_argument(
+        "--overlay",
+        type=Path,
+        metavar="DIR",
+        help="flat dir of files that replace or add to the source tree in the work dir",
     )
     p.add_argument(
         "--allow-native",
@@ -456,6 +530,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             force=args.force,
             keep_work=args.keep_work,
             quiet=args.quiet,
+            overlay=args.overlay,
         )
     except GuardError as exc:
         print(f"warband-build: error: {exc}", file=sys.stderr)

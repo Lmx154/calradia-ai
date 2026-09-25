@@ -33,4 +33,4 @@ extend-exclude = ["tests/golden"]
 select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.ruff.format]
-exclude = ["game/**"]
+exclude = ["game/**", "*.md"]  # Module System snippets in docs use upstream style
