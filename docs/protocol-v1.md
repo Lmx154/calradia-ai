@@ -126,8 +126,13 @@ This one function is applied to every T, in this order:
 |---|---|---|
 | (a) | tx_rid = 0 | Drop the frame. |
 | (b) | WF and reg0 = tx_rid | Complete the transport, then deliver the frame. |
-| (c) | WF and reg0 ≠ tx_rid | A stray reply: drop it and do NOT complete the transport. |
-| (d) | anything else (empty body = transport failure, or malformed) | Complete the transport as failed. |
+| (c) | WF, reg0 ≠ tx_rid, and `$cai_tx_abandoned` > 0 | A late reply to a request abandoned by Reset: decrement the count, drop the frame, and do NOT complete the transport. |
+| (d) | anything else (empty body = transport failure, malformed, or WF with the wrong rid when nothing is abandoned) | Complete the transport as failed. |
+
+Amended on 2026-09-25 after in-game testing with `--fault wrong-rid`. The original rule
+(c) dropped *every* wrong-rid frame, which left the transport busy with no request left
+to complete it: the engine makes exactly one callback per request, and the mod sends only
+one at a time. Reset increments `$cai_tx_abandoned`.
 
 - **Sending:**
   - The only send site is `script_cai_tx_send`, and it sends only when `$cai_tx_rid`

@@ -56,6 +56,7 @@ NEW_VARIABLES = [
     b"cai_obj_cancel",
     b"cai_obj_reset",
     b"cai_obj_close",
+    b"cai_tx_abandoned",
 ]
 NEW_SCRIPTS = [b"cai_new_id", b"cai_tx_send"]
 CHANGED_SCRIPT = b"game_receive_url_response"
@@ -91,6 +92,7 @@ ALLOWED_OPERATIONS = {
     "is_between",
     "assign",
     "val_add",
+    "val_sub",
     "val_mod",
     "store_sub",
     "store_mul",

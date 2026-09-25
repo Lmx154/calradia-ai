@@ -9314,9 +9314,16 @@ scripts = [
         # (a) Nothing outstanding: drop the frame.
         (eq, "$cai_tx_rid", 0),
       (else_try),
-        # (c) A stray reply to another request: drop it and keep the transport busy.
+        # (c) A stray reply. The engine makes exactly one callback per request and the mod
+        # sends one request at a time, so a reply with another rid can only belong to a
+        # request abandoned by Reset ($cai_tx_abandoned counts them): drop it and keep the
+        # transport busy. With nothing abandoned it is our own reply arriving garbled,
+        # which case (d) below handles. (In-game test 2026-09-25, --fault wrong-rid: the
+        # original rule left the transport busy with no request left to complete it.)
         (eq, ":well_formed", 1),
         (neq, ":rid", "$cai_tx_rid"),
+        (gt, "$cai_tx_abandoned", 0),
+        (val_sub, "$cai_tx_abandoned", 1),
       (else_try),
         # (b) The reply to our request: complete the transport, then deliver the frame.
         (eq, ":well_formed", 1),
@@ -9358,12 +9365,18 @@ scripts = [
           (try_end),
         (try_end),
       (else_try),
-        # (d) Empty body (transport failure) or malformed frame: complete the transport as failed.
+        # (d) Empty body (transport failure), a malformed frame, or our own reply with a
+        # wrong rid: complete the transport as failed.
         (assign, "$cai_tx_rid", 0),
         (try_begin),
           (eq, ":for_conversation", 1),
           (assign, "$cai_conv_state", CAI_CONV_FAILED),
-          (str_store_string, s67, "@calradia-server could not be reached."),
+          (try_begin),
+            (eq, ":well_formed", 1),
+            (str_store_string, s67, "@calradia-server sent a garbled reply."),
+          (else_try),
+            (str_store_string, s67, "@calradia-server could not be reached."),
+          (try_end),
           (assign, "$cai_reply_new", 1),
         (try_end),
       (try_end),

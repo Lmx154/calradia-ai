@@ -13861,6 +13861,8 @@ presentations = [
           (neq, "$cai_tx_inst", "$cai_prsnt_inst"),
           (ge, "$cai_now_ms", CAI_RESET_MS),
           (assign, "$cai_tx_rid", 0),
+          # The abandoned request may still deliver a callback; case (c) drops it.
+          (val_add, "$cai_tx_abandoned", 1),
         (try_end),
       (else_try),
         (eq, ":object", "$cai_obj_close"),
