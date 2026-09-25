@@ -75,6 +75,7 @@ compilation failed and 2 if the invocation was refused. Options:
 | `--sync-ids` | Copy the regenerated `ID_*.py` files back into the source tree (see below). |
 | `--force` | Allow a non-empty output directory that this tool did not create. |
 | `--allow-native` | Allow an output directory named `Modules/Native`. |
+| `--overlay DIR` | Copy the files in `DIR` over the sources before compiling. This is how a mod is kept as "vanilla + changed files" (see [CalradiaAI](#calradiaai-mod)). With `--sync-ids`, IDs are written into `DIR`. |
 | `--keep-work` | Keep the temporary work directory for debugging. |
 | `-q, --quiet` | Print only problems. |
 
@@ -178,6 +179,34 @@ Then run `uv run warband-build`, and `uv run warband-build --sync-ids` if you ad
 reordered objects. The legacy sources are plain Python 3, and `from X import *` is still
 how they share names. They are deliberately not reorganized into a package.
 
+## CalradiaAI mod
+
+`mods/calradia_ai/overlay/` holds the files that differ from vanilla. Each is a complete
+copy of the vanilla file with small, marked edits:
+
+| File | Change |
+|---|---|
+| `module_game_menus.py` | Adds two camp-menu options: "Contact the Calradia AI server." and "Stop waiting…" |
+| `module_scripts.py` | Implements `script_game_receive_url_response` |
+| `variables.txt` | The full list of vanilla global variables with the mod's one variable appended at the end, so every vanilla variable keeps its index |
+
+Everything else in the compiled output stays vanilla. `tests/test_calradia_ai.py` checks
+this: files the mod doesn't touch must be byte-identical to vanilla, and in the rest the
+only allowed difference is renumbered quick strings.
+
+To run it:
+
+```bash
+GAME=~/.steam/steam/steamapps/common/"MountBlade Warband"
+cp -r "$GAME/Modules/Native" "$GAME/Modules/CalradiaAI"      # first time only
+uv run warband-build --overlay mods/calradia_ai/overlay -o "$GAME/Modules/CalradiaAI" --force
+cargo run --release --manifest-path calradia-server/Cargo.toml   # listens on 127.0.0.1:8766
+```
+
+In game, choose **Camp → Contact the Calradia AI server.** See
+[`docs/http-ipc.md`](docs/http-ipc.md) for the verified engine behavior (asynchronous
+GET, no timeout, one request at a time) and the reply protocol.
+
 ## Tests and linting
 
 ```bash
@@ -195,6 +224,7 @@ uv run ruff format --check .
 | `test_serialization.py` | Operand encoding (`$global`, `:local`, `@quick string`, tagged IDs, negative and large ints), opmask and opcode values, identifier escaping, `%f` float formatting, and integer division rounding down for negative numbers. |
 | `test_identifiers.py` | IDs such as `trp_player == 0` stay stable, and every generated ID file equals the reference. |
 | `test_module_data.py` | The Module_data output is byte-identical to the reference. |
+| `test_calradia_ai.py` | The CalradiaAI overlay builds in one pass. Only the mod's menu options and response script change, vanilla global variables keep their indices, and every other difference is a renumbered quick string. |
 | `test_driver_unit.py` | The driver's own logic, tested against a small fake module (fixpoint, error detection, guards, publishing). |
 
 Ruff applies the full rule set to `src/` and `tests/`. For the legacy `game/` tree, it
@@ -235,12 +265,10 @@ the original sources, so a real regression in the port cannot pass by changing i
   - `strings.txt` differs in `str_credits_3` and `str_credits_9`. TaleWorlds updated
     those credits after 1.171.
 
-**Not verified:**
-
-- The game was not launched with the compiled module. Byte identity with the Python 2
-  build means the port introduces nothing new. Whether the engine accepts LF line
-  endings where the shipped files use CRLF has not been tested. Before relying on it,
-  build into a copy module, start a new game and check `rgl_log.txt`.
+- The game loads and plays the compiled module on native Linux Warband 1.174 (in-game
+  smoke test on 2026-09-25). That covers LF line endings, the main menu, Quick Battle
+  (including the biographies with the cp1254 dashes), character creation, the world map,
+  towns, trading, battles, and saving and loading.
 
 ## Known limitations
 
