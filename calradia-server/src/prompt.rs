@@ -10,13 +10,14 @@
 
 use crate::characters::Profile;
 use crate::ids::{self, place_kind, troop_kind, Kind};
-use crate::memory::{Recall, Turn};
+use crate::memory::{Initiative, Plan, Recall, Turn};
 use crate::npc::Npc;
 use crate::protocol::{
     TalkV2, ST_BETROTHED, ST_FACTION_LEADER, ST_IN_PARTY, ST_MARSHAL, ST_OTHER_PRISONER,
     ST_PLAYER_PRISONER, ST_PLAYER_RULER, ST_PLAYER_VASSAL, ST_SPOUSE,
 };
 use crate::realms::Realms;
+use crate::world::WorldEvent;
 use std::fmt::Write as _;
 
 const SETTING: &str = "Calradia, the world of Mount&Blade: Warband. You know its six \
@@ -76,8 +77,34 @@ pub fn v1_chat(npc: &Npc, pname: &str, day: u32, msg: &str) -> Chat {
 /// Upper bound on the characters of all v2 messages together (about 3000 tokens).
 pub const MAX_PROMPT_CHARS: usize = 12000;
 
+/// What a v2 prompt adds beyond the talk and its memories (Milestones 4-6).
+#[derive(Debug, Default)]
+pub struct Extras {
+    /// World events the character knows of, oldest first (world::recall).
+    pub world: Vec<WorldEvent>,
+    /// The character's current aims, and what it did of its own accord lately.
+    pub plan: Option<Plan>,
+    pub deeds: Vec<Initiative>,
+    /// The character may propose an action (actions.rs).
+    pub actions: bool,
+}
+
 /// The shape of the answer, and what the character may and may not claim.
-fn rules(name: &str, player: &str) -> String {
+fn rules(name: &str, player: &str, t: &TalkV2, actions: bool) -> String {
+    if actions {
+        return format!(
+            "Rules: Speak only as {name}, in the first person, answering what {player} just \
+             said. Reply in 1 to 3 sentences of plain speech: no narration, stage directions, \
+             asterisks, emojis or markdown, and never speak or act for {player}. You know only \
+             what is written above and what someone of your station in Calradia would know. \
+             The situation, events and memories above are true; do not present any other event \
+             between you and {player} as having happened, and do not state rumours as fact. \
+             You have your own goals and values: you need not agree with, like, trust or help \
+             {player}, and you may be proud, rude, evasive or deceitful when it suits you. \
+             Never mention being an AI, a game or anything modern.\n{}",
+            deed_rules(player, t)
+        );
+    }
     format!(
         "Rules: Speak only as {name}, in the first person, answering what {player} just said. \
          Reply in 1 to 3 sentences of plain speech: no narration, stage directions, asterisks, \
@@ -90,6 +117,85 @@ fn rules(name: &str, player: &str) -> String {
          can give here: you cannot hand over money, goods, troops or land in this talk, so \
          do not claim to. Never mention being an AI, a game or anything modern."
     )
+}
+
+/// The deeds a reply may carry, with what the character and the player can afford.
+fn deed_rules(player: &str, t: &TalkV2) -> String {
+    let noble = matches!(
+        troop_kind(&t.character),
+        Kind::King | Kind::Lord | Kind::Pretender | Kind::Lady
+    );
+    let mut deeds = vec![format!(
+        "'relation <number from -3 to 3>' when this exchange truly changes how you regard \
+         {player}"
+    )];
+    if let (true, Some(gold)) = (noble, t.context.npc_gold) {
+        deeds.push(format!(
+            "'give <denars>' to offer {player} money from your own purse (you have about {gold} \
+             denars)"
+        ));
+    }
+    if let Some(gold) = t.context.player_gold {
+        deeds.push(format!(
+            "'ask <denars>' to ask {player} for money ({player} carries {gold} denars)"
+        ));
+    }
+    format!(
+        "Deeds: your reply may also do one thing. Only if it truly does, end it with one line \
+         'ACTION: <deed> <number>', where the deed is {}. {player} must accept or refuse any \
+         money. Most replies need no ACTION line. Beyond these deeds, words are all you can \
+         give: you cannot hand over goods, troops or land in this talk, so do not claim to.",
+        join_or(&deeds)
+    )
+}
+
+fn join_or(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+    }
+}
+
+/// The world events a character knows of.
+fn world_section(events: &[WorldEvent]) -> String {
+    if events.is_empty() {
+        return String::new();
+    }
+    let mut out =
+        "\nEvents in Calradia that you know of (from the game's record; these happened):\n"
+            .to_string();
+    for e in events {
+        let _ = writeln!(out, "- Day {}: {}", e.day, e.text);
+    }
+    out
+}
+
+/// The character's own aims and deeds (Milestone 6).
+fn aims_section(plan: Option<&Plan>, deeds: &[Initiative], player: &str) -> String {
+    let mut out = String::new();
+    if let Some(p) = plan {
+        let _ = writeln!(
+            out,
+            "\nYour private aims (decided on day {}; reveal them only if it serves you):\n- Goal: {}\n- Plan: {}",
+            p.day, p.goal, p.plan
+        );
+    }
+    if !deeds.is_empty() {
+        out += "What you did of your own accord lately:\n";
+        for d in deeds {
+            let what = match d.kind {
+                crate::protocol::INIT_LETTER => format!("you wrote to {player}: \"{}\"", d.text),
+                crate::protocol::INIT_ATTITUDE => format!(
+                    "your regard for {player} changed by {:+}, and you wrote: \"{}\"",
+                    d.amount, d.text
+                ),
+                _ => d.text.clone(),
+            };
+            let _ = writeln!(out, "- Day {}: {what}", d.day);
+        }
+    }
+    out
 }
 
 /// The Native module's own descriptions of `slot_lord_reputation_type` (module_constants.py).
@@ -324,8 +430,11 @@ fn display_name(t: &TalkV2) -> &str {
 }
 
 fn quote(turn: &Turn, player: &str) -> String {
+    let deed = crate::actions::describe(turn.action_kind, turn.action_amount, turn.outcome, player)
+        .map(|d| format!(" ({d})"))
+        .unwrap_or_default();
     format!(
-        "Day {}: {player} said \"{}\" and you answered \"{}\"",
+        "Day {}: {player} said \"{}\" and you answered \"{}\"{deed}",
         turn.day, turn.player_text, turn.npc_text
     )
 }
@@ -362,7 +471,13 @@ fn memories(r: &Recall, player: &str) -> String {
 
 /// The chat for a v2 talk, within `MAX_PROMPT_CHARS`. `profile` is None when the character
 /// has no file; `recall` has already been bounded by memory::recall.
-pub fn v2_chat(t: &TalkV2, profile: Option<&Profile>, realms: &Realms, recall: &Recall) -> Chat {
+pub fn v2_chat(
+    t: &TalkV2,
+    profile: Option<&Profile>,
+    realms: &Realms,
+    recall: &Recall,
+    extras: &Extras,
+) -> Chat {
     let player = if t.context.player_name.is_empty() {
         "the player"
     } else {
@@ -384,8 +499,9 @@ pub fn v2_chat(t: &TalkV2, profile: Option<&Profile>, realms: &Realms, recall: &
         None => String::new(),
     };
     let fixed = format!(
-        "{who}{lore}\n\nSetting: {SETTING}\n\n{}",
-        situation(t, player, realms)
+        "{who}{lore}\n\nSetting: {SETTING}\n\n{}{}",
+        situation(t, player, realms),
+        aims_section(extras.plan.as_ref(), &extras.deeds, player)
     );
     let mut r = Recall {
         current: recall.current.clone(),
@@ -393,13 +509,25 @@ pub fn v2_chat(t: &TalkV2, profile: Option<&Profile>, realms: &Realms, recall: &
         relevant: recall.relevant.clone(),
         ..*recall
     };
+    let mut world = extras.world.clone();
     loop {
-        let chat = assemble(&fixed, &r, t, player, name, profile.is_some());
+        let chat = assemble(
+            &fixed,
+            &world,
+            &r,
+            t,
+            player,
+            name,
+            profile.is_some(),
+            extras,
+        );
         let over = chat.len() > MAX_PROMPT_CHARS;
-        // Drop the least important memory first: relevant, then recent, then the oldest
-        // turns of the conversation in progress.
+        // Drop the least important memory first: relevant turns, then world events, then
+        // recent turns, then the oldest turns of the conversation in progress.
         if over && !r.relevant.is_empty() {
             r.relevant.remove(0);
+        } else if over && !world.is_empty() {
+            world.remove(0);
         } else if over && !r.recent.is_empty() {
             r.recent.remove(0);
         } else if over && !r.current.is_empty() {
@@ -410,18 +538,22 @@ pub fn v2_chat(t: &TalkV2, profile: Option<&Profile>, realms: &Realms, recall: &
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn assemble(
     fixed: &str,
+    world: &[WorldEvent],
     r: &Recall,
     t: &TalkV2,
     player: &str,
     name: &str,
     has_profile: bool,
+    extras: &Extras,
 ) -> Chat {
     let system = format!(
-        "{fixed}\n{}\n\n{}",
+        "{fixed}{}\n{}\n\n{}",
+        world_section(world),
         memories(r, player),
-        rules(name, player)
+        rules(name, player, t, extras.actions)
     );
     let mut messages = vec![("system", system)];
     for turn in &r.current {
@@ -450,10 +582,94 @@ fn assemble(
     if !r.current.is_empty() {
         let _ = write!(fake, "; this talk has {} earlier lines", r.current.len());
     }
+    if !world.is_empty() {
+        let _ = write!(
+            fake,
+            "; I know of {} events, lately: {}",
+            world.len(),
+            world[world.len() - 1].text
+        );
+    }
+    if let Some(p) = &extras.plan {
+        let _ = write!(fake, "; my aim: {}", p.goal);
+    }
     fake += ".";
+    // A test hook for --fake-llm: an "ACTION: ..." in the player's message is echoed, so the
+    // game's action handling can be tried without a model. It is validated like any other.
+    if let Some(i) = t.msg.to_ascii_lowercase().find("action:") {
+        let _ = write!(fake, "\n{}", &t.msg[i..]);
+    }
     Chat {
         messages,
         fake_reply: fake,
+    }
+}
+
+/// The chat for a planning task (Milestone 6): what `character` knows, then the planner's
+/// instructions. `turns` are its conversations with the player on the save's chain.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_chat(
+    character: &str,
+    profile: &Profile,
+    realm: Option<&crate::realms::Realm>,
+    world: &[WorldEvent],
+    turns: &[Turn],
+    previous: Option<&Plan>,
+    player: &str,
+    day: u32,
+) -> Chat {
+    let player = if player.is_empty() {
+        "the player"
+    } else {
+        player
+    };
+    let name = crate::names::names()
+        .troop(character)
+        .unwrap_or(&profile.name);
+    let mut system = format!("You are {name}.\n{}", profile.render());
+    if let Some(r) = realm {
+        let _ = write!(
+            system,
+            "\n\nWhat you know as one of the {} ({}):\n{}",
+            r.people,
+            r.name,
+            r.render()
+        );
+    }
+    let _ = write!(system, "\n\nSetting: {SETTING}\n{}", world_section(world));
+    let recent = &turns[turns.len().saturating_sub(4)..];
+    if recent.is_empty() {
+        let _ = write!(system, "\nYou have not spoken with {player} yet.\n");
+    } else {
+        let _ = writeln!(system, "\nYour latest conversations with {player}:");
+        for t in recent {
+            let _ = writeln!(system, "- {}", quote(t, player));
+        }
+    }
+    if let Some(p) = previous {
+        let _ = write!(
+            system,
+            "\nYour aims until now (day {}): goal: {} Plan: {}\n",
+            p.day, p.goal, p.plan
+        );
+    }
+    let _ = write!(
+        system,
+        "\n{}",
+        crate::planner::instructions(name, player, day)
+    );
+    let fake_reply = serde_json::json!({
+        "goal": format!("[fake] {name} means to hold what is theirs."),
+        "plan": format!("[fake] Watch the {} events I know of.", world.len()),
+        "act": {
+            "kind": "letter",
+            "text": format!("[fake] {name} writes to {player} on day {day}, knowing of {} events.", world.len()),
+        },
+    })
+    .to_string();
+    Chat {
+        messages: vec![("system", system), ("user", "Decide now.".to_string())],
+        fake_reply,
     }
 }
 
@@ -509,8 +725,13 @@ culture = "Horse archers."
                 ruler_name: String::new(),
                 spouse_name: String::new(),
                 father_name: String::new(),
+                npc_gold: None,
+                player_gold: None,
             },
             msg: "Hail.".into(),
+            frame: 1,
+            world_head: None,
+            head_outcome: 0,
         }
     }
 
@@ -575,7 +796,8 @@ culture = "Horse archers."
             "{s}"
         );
         // Realm lore follows the profile for members of a realm with a file.
-        let system = &v2_chat(&t, None, &realms, &Recall::default()).messages[0].1;
+        let system =
+            &v2_chat(&t, None, &realms, &Recall::default(), &Extras::default()).messages[0].1;
         assert!(
             system.contains(
                 "What you know as one of the Swadian (Kingdom of Swadia):\nLand: Green hills"
@@ -591,6 +813,7 @@ culture = "Horse archers."
             None,
             &Realms::default(),
             &Recall::default(),
+            &Extras::default(),
         );
         let system = &chat.messages[0].1;
         assert!(

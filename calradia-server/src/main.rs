@@ -9,18 +9,22 @@
 //! Protocol v2 adds `/v2/talk`: a real Warband character, the live game state, and memory
 //! of earlier conversations, kept in SQLite per campaign and savegame branch (memory.rs).
 
+mod actions;
 mod characters;
 mod http;
 mod ids;
 mod jobs;
 mod memory;
+mod names;
 mod npc;
+mod planner;
 mod prompt;
 mod protocol;
 mod realms;
 mod runner;
 mod sanitize;
 mod upstream;
+mod world;
 
 use characters::Registry;
 use http::{format_response, read_request, Request};
@@ -28,8 +32,8 @@ use jobs::{Limits, Store};
 use memory::Memory;
 use npc::Npc;
 use protocol::{
-    frame, Op, CODE_BAD_REQUEST, DEFAULT_BIND, GAME_GIVE_UP_SECS, REASON_BAD_PARAM, RID_MAX,
-    UPSTREAM_CONNECT_TIMEOUT_SECS, UPSTREAM_MAX_BODY,
+    frame, frame_v2, Op, CODE_BAD_REQUEST, DEFAULT_BIND, GAME_GIVE_UP_SECS, REASON_BAD_PARAM,
+    RID_MAX, UPSTREAM_CONNECT_TIMEOUT_SECS, UPSTREAM_MAX_BODY,
 };
 use realms::Realms;
 use runner::Runner;
@@ -55,6 +59,10 @@ usage: calradia-server [options]
   --memory-db PATH      conversation memory, SQLite (env CALRADIA_MEMORY_DB, default
                         $XDG_DATA_HOME/calradia-ai/memory.sqlite3)
   --memory-report       print what the memory database holds, then exit
+  --log-entries FILE    how Native's event log entries read as news
+                        (env CALRADIA_LOG_ENTRIES, default calradia-server/world/log_entries.toml)
+  --no-actions          characters never propose actions (Milestone 5)
+  --no-autonomy         characters never plan or act on their own (Milestone 6)
   --log-prompts         log every prompt sent to the model in full
   --fake-llm            skip the upstream; answer a canned reply after 1.5 s (for
                         /v2/talk, a summary of the character, context and memories)
@@ -140,6 +148,9 @@ struct Options {
     memory_db: PathBuf,
     memory_report: bool,
     log_prompts: bool,
+    log_entries: PathBuf,
+    actions: bool,
+    autonomy: bool,
 }
 
 /// `$XDG_DATA_HOME/calradia-ai/memory.sqlite3`, or under `~/.local/share`.
@@ -183,6 +194,12 @@ fn parse_args(
             .map_or_else(|| default_memory_db(&env), PathBuf::from),
         memory_report: false,
         log_prompts: false,
+        log_entries: PathBuf::from(from_env(
+            "CALRADIA_LOG_ENTRIES",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/world/log_entries.toml"),
+        )),
+        actions: true,
+        autonomy: true,
     };
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{flag} needs a value"));
@@ -200,6 +217,9 @@ fn parse_args(
             "--memory-db" => o.memory_db = PathBuf::from(value()?),
             "--memory-report" => o.memory_report = true,
             "--log-prompts" => o.log_prompts = true,
+            "--log-entries" => o.log_entries = PathBuf::from(value()?),
+            "--no-actions" => o.actions = false,
+            "--no-autonomy" => o.autonomy = false,
             "--fault" => o.fault = Some(parse_fault(&value()?)?),
             "--max-jobs" => o.limits.max_jobs = count(value()?)? as usize,
             "--queue-len" => o.limits.queue_len = count(value()?)? as usize,
@@ -330,12 +350,29 @@ fn main() {
         opts.factions.display(),
         realms.ids().collect::<Vec<_>>().join(", ")
     ));
+    let templates = match world::LogTemplates::load(&opts.log_entries) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: log entries: {e}");
+            process::exit(2);
+        }
+    };
+    log(format!(
+        "{} log entry types from {}; actions {}; autonomy {}",
+        templates.len(),
+        opts.log_entries.display(),
+        if opts.actions { "on" } else { "off" },
+        if opts.autonomy { "on" } else { "off" }
+    ));
     let runner = Runner {
         backend,
         characters,
         realms,
+        templates,
         memory,
         log_prompts: opts.log_prompts,
+        actions: opts.actions,
+        autonomy: opts.autonomy,
     };
     if let Err(e) = start(listener, opts.limits, runner, opts.fault, npc::NPCS) {
         eprintln!("error: {e}");
@@ -345,6 +382,7 @@ fn main() {
 
 struct App {
     store: Arc<Store>,
+    runner: Arc<Runner>,
     npcs: &'static [Npc],
     fault: Option<Fault>,
 }
@@ -358,8 +396,14 @@ fn start(
     npcs: &'static [Npc],
 ) -> std::io::Result<()> {
     let store = Arc::new(Store::new(limits));
-    jobs::spawn_worker(store.clone(), runner)?;
-    let app = Arc::new(App { store, npcs, fault });
+    let runner = Arc::new(runner);
+    jobs::spawn_worker(store.clone(), runner.clone())?;
+    let app = Arc::new(App {
+        store,
+        runner,
+        npcs,
+        fault,
+    });
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
@@ -377,6 +421,26 @@ struct Outcome {
     rid: u32,
     code: u8,
     text: String,
+    /// `K|N|W|X` of a v2 frame; None for a v1 frame.
+    extra: Option<[i32; 4]>,
+}
+
+impl Outcome {
+    fn frame(&self, rid: u32) -> String {
+        match self.extra {
+            Some(extra) => frame_v2(rid, self.code, &self.text, extra),
+            None => frame(rid, self.code, &self.text),
+        }
+    }
+}
+
+/// Whether a request is answered with v2 frames: every `/v2/` route except a `/v2/talk`
+/// from a game that does not read them (no `f=2`).
+fn wants_v2(req: &Request) -> bool {
+    match req.path.as_str() {
+        protocol::ROUTE_TALK_V2 => req.param("f") == Some("2"),
+        path => path.starts_with("/v2/"),
+    }
 }
 
 impl App {
@@ -386,17 +450,21 @@ impl App {
                 rid: rejection.rid,
                 code: CODE_BAD_REQUEST,
                 text: rejection.reason.to_string(),
+                extra: wants_v2(req).then_some([0; 4]),
             },
             Ok(v1) => {
+                let v2 = wants_v2(req);
                 let answer = match v1.op {
                     Op::Talk(talk) => self.store.talk(v1.job, *talk),
                     Op::Result => self.store.result(v1.job),
                     Op::Cancel => self.store.cancel(v1.job),
+                    Op::World(node) => self.runner.world(&node, &self.store),
                 };
                 Outcome {
                     rid: v1.rid,
                     code: answer.code,
                     text: answer.text,
+                    extra: answer.extra.or(v2.then_some([0; 4])),
                 }
             }
         }
@@ -417,8 +485,10 @@ fn handle(mut stream: TcpStream, app: &App) {
     };
     let started = Instant::now();
     let out = app.respond(&req);
-    let mut body = frame(out.rid, out.code, &out.text);
-    let fault = app.fault.filter(|_| req.path.starts_with("/v1/"));
+    let mut body = out.frame(out.rid);
+    let fault = app
+        .fault
+        .filter(|_| req.path.starts_with("/v1/") || req.path.starts_with("/v2/"));
     match fault {
         Some(Fault::Hang) => {
             log_request(&req, &body, started, "fault hang: holding the connection");
@@ -432,7 +502,7 @@ fn handle(mut stream: TcpStream, app: &App) {
             return log_request(&req, &body, started, "fault close: closed without reply");
         }
         Some(Fault::Empty) => body.clear(),
-        Some(Fault::WrongRid) => body = frame(out.rid % RID_MAX + 1, out.code, &out.text),
+        Some(Fault::WrongRid) => body = out.frame(out.rid % RID_MAX + 1),
         Some(Fault::Malformed) => body = "garbage|x".to_string(),
         Some(Fault::Delay) => thread::sleep(FAULT_DELAY),
         Some(Fault::Oversize(_) | Fault::NonAscii) | None => {}

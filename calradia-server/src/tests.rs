@@ -210,6 +210,15 @@ fn shipped_characters() -> Registry {
     .unwrap()
 }
 
+/// The shipped log entry sentences.
+fn shipped_templates() -> world::LogTemplates {
+    world::LogTemplates::load(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/world/log_entries.toml"
+    )))
+    .unwrap()
+}
+
 /// The shipped kingdom lore.
 fn shipped_realms() -> Realms {
     Realms::load(std::path::Path::new(concat!(
@@ -231,6 +240,9 @@ fn server(url: &str, limits: Limits, npcs: &'static [Npc]) -> SocketAddr {
         backend: upstream_backend(url),
         characters: shipped_characters(),
         realms: shipped_realms(),
+        templates: shipped_templates(),
+        actions: true,
+        autonomy: true,
         memory: Arc::new(Memory::in_memory()),
         log_prompts: false,
     };
@@ -1219,6 +1231,9 @@ fn memory_server(url: &str, memory: Arc<Memory>) -> SocketAddr {
         backend: upstream_backend(url),
         characters: shipped_characters(),
         realms: shipped_realms(),
+        templates: shipped_templates(),
+        actions: true,
+        autonomy: true,
         memory,
         log_prompts: false,
     };
@@ -1779,6 +1794,9 @@ fn fake_llm_summarizes_what_the_prompt_contains() {
         },
         characters: shipped_characters(),
         realms: shipped_realms(),
+        templates: shipped_templates(),
+        actions: true,
+        autonomy: true,
         memory: Arc::new(Memory::in_memory()),
         log_prompts: true,
     };
@@ -1819,4 +1837,497 @@ fn fake_llm_summarizes_what_the_prompt_contains() {
     // v1 keeps its canned in-character replies.
     assert_eq!(talk(addr, 4, "Hi").code, CODE_PENDING);
     assert!(!wait_done(addr, 4).text.starts_with("[fake]"));
+}
+
+// ---------------------------------------------------------------- Milestones 4-6
+
+use crate::memory::Plan;
+use crate::protocol::{LogEntry, Snapshot};
+
+/// Parses a v2 body `R|C|T|K|N|W|X|R`, asserting the frame's guarantees.
+fn parse_frame2(body: &str) -> (Frame, [i32; 4]) {
+    assert!(body.len() <= 580, "frame of {} bytes", body.len());
+    let parts: Vec<&str> = body.split('|').collect();
+    assert_eq!(parts.len(), 8, "{body:?}");
+    assert_eq!(parts[0], parts[7], "{body:?}");
+    let extra = [3, 4, 5, 6].map(|i| parts[i].parse::<i32>().expect("integer"));
+    let v1 = format!("{}|{}|{}|{}", parts[0], parts[1], parts[2], parts[7]);
+    (parse_frame(&v1), extra)
+}
+
+fn list(values: &[u32]) -> String {
+    values.iter().map(|v| format!(".{v}")).collect()
+}
+
+fn event_url(rid: u32, node: u32, whead: u32, day: u32, e: &LogEntry) -> String {
+    format!(
+        "/v2/event?v=2&rid={rid}&job={node}&camp=7&whead={whead}&day={day}&idx={}&type={}\
+         &time={}&actor={}&center={}&clord={}&cfac={}&troop={}&tfac={}&fac={}&pname=Ylva&pfname=&end=1",
+        e.index,
+        e.kind,
+        e.hours,
+        enc(&e.actor.to_string()),
+        enc(&e.center.to_string()),
+        enc(&e.center_lord.to_string()),
+        enc(&e.center_faction.to_string()),
+        enc(&e.troop.to_string()),
+        enc(&e.troop_faction.to_string()),
+        enc(&e.faction.to_string()),
+    )
+}
+
+fn world_url(rid: u32, node: u32, whead: u32, day: u32, s: &Snapshot) -> String {
+    let half = s.lords.len() / 2;
+    format!(
+        "/v2/world?v=2&rid={rid}&job={node}&camp=7&whead={whead}&day={day}&alive={}&pname=Ylva\
+         &pfname=&wars={}&owners={}&lords={}&lords2={}&end=1",
+        s.alive,
+        enc(&list(&s.wars)),
+        enc(&list(&s.owners)),
+        enc(&list(&s.lords[..half])),
+        enc(&list(&s.lords[half..])),
+    )
+}
+
+fn tick_url(rid: u32, node: u32, whead: u32, day: u32, head: u32) -> String {
+    format!(
+        "/v2/tick?v=2&rid={rid}&job={node}&camp=7&whead={whead}&day={day}&head={head}\
+         &pname=Ylva&pfname=&end=1"
+    )
+}
+
+fn send2(addr: SocketAddr, target: &str) -> (Frame, [i32; 4]) {
+    parse_frame2(&get(addr, target))
+}
+
+/// `wait_done` for a job whose results come in v2 frames (`f=2`).
+fn wait_done2(addr: SocketAddr, job: u32) -> (Frame, [i32; 4]) {
+    let start = Instant::now();
+    loop {
+        let (f, extra) = send2(addr, &format!("/v1/result?v=1&rid=77&job={job}&end=1"));
+        if f.code != CODE_PENDING {
+            return (f, extra);
+        }
+        assert!(start.elapsed() < Duration::from_secs(8), "job {job} stuck");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn fac(id: &str) -> i32 {
+    ids().factions.index(id).unwrap() as i32
+}
+
+fn troop(id: &str) -> i32 {
+    ids().troops.index(id).unwrap() as i32
+}
+
+/// Ylva (the player) defeated Count Klargus of Swadia on day 3.
+fn defeat() -> LogEntry {
+    LogEntry {
+        index: 1,
+        kind: 11,
+        hours: 3 * 24 + 2,
+        actor: 0,
+        center: -1,
+        center_lord: -1,
+        center_faction: -1,
+        troop: troop("trp_knight_1_1"),
+        troop_faction: fac("fac_kingdom_1"),
+        faction: -1,
+    }
+}
+
+fn baseline() -> Snapshot {
+    let (realms, centers, lords) = protocol::snapshot_shape();
+    let swadia = fac("fac_kingdom_1") as u32;
+    Snapshot {
+        alive: 0b111_1110,
+        wars: vec![0; realms * (realms - 1) / 2],
+        owners: vec![swadia; centers],
+        lords: vec![swadia * 2; lords],
+    }
+}
+
+fn server_with(url: &str, memory: Arc<Memory>, actions: bool, autonomy: bool) -> SocketAddr {
+    let runner = Runner {
+        backend: upstream_backend(url),
+        characters: shipped_characters(),
+        realms: shipped_realms(),
+        templates: shipped_templates(),
+        memory,
+        log_prompts: false,
+        actions,
+        autonomy,
+    };
+    serve(runner, limits(), npc::NPCS)
+}
+
+fn stored() -> Frame {
+    fr(3001, CODE_READY, "stored")
+}
+
+#[test]
+fn world_events_are_chained_per_save_and_recalled_in_talks() {
+    let up = fake(vec![Up::Reply("I remember.")]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = server_with(&up.url, memory.clone(), true, false);
+    // Node 11: the log entry. Node 12: a first snapshot (a baseline, no events). Node 13:
+    // the next day's snapshot, in which Sargoth fell to the Vaegirs.
+    assert_eq!(
+        send2(addr, &event_url(3001, 11, 0, 3, &defeat())),
+        (stored(), [0; 4])
+    );
+    assert_eq!(
+        send2(addr, &world_url(3001, 12, 11, 3, &baseline())).0,
+        stored()
+    );
+    let mut next = baseline();
+    next.owners[0] = fac("fac_kingdom_2") as u32;
+    assert_eq!(send2(addr, &world_url(3001, 13, 12, 4, &next)).0, stored());
+    // A lord of Swadia, talked to with the world head 13, knows both.
+    let lord = V2 {
+        troop: "trp_knight_1_1",
+        nname: "Count Klargus",
+        fac: "fac_kingdom_1",
+        fname: "Kingdom of Swadia",
+        occ: 2,
+        st: 0,
+        ..borcha("Do you know me?")
+    };
+    let url = |v: &V2, whead: u32| {
+        v2_url(2001, 1, v).replace("&pname=", &format!("&whead={whead}&pname="))
+    };
+    let f = parse_frame(&get(addr, &url(&lord, 13)));
+    assert_eq!(f.code, CODE_PENDING);
+    wait_done(addr, 1);
+    contains_all(&up.messages(0)[0].1, &[
+        "Events in Calradia that you know of (from the game's record; these happened):",
+        "- Day 3: Ylva defeated Count Klargus in battle.",
+        "- Day 4: The town of Sargoth passed from the Kingdom of Swadia to the Kingdom of Vaegirs.",
+    ]);
+    // Another save that reloaded before node 13 only knows the defeat.
+    get(
+        addr,
+        &url(
+            &V2 {
+                conv: 101,
+                ..lord.clone()
+            },
+            12,
+        )
+        .replace("job=1&", "job=2&"),
+    );
+    wait_done(addr, 2);
+    let system = up.messages(1)[0].1.clone();
+    assert!(
+        system.contains("defeated Count Klargus") && !system.contains("Sargoth passed"),
+        "{system}"
+    );
+    // Retrying a node is harmless; reusing its id for something else is a conflict.
+    assert_eq!(
+        send2(addr, &event_url(3001, 11, 0, 3, &defeat())).0,
+        stored()
+    );
+    let other = LogEntry {
+        index: 2,
+        ..defeat()
+    };
+    assert_eq!(
+        send2(addr, &event_url(3001, 11, 0, 3, &other)).0,
+        fr(3001, CODE_BAD_REQUEST, "conflict")
+    );
+    assert!(
+        memory.report().unwrap().contains("world 3 nodes, 2 events"),
+        "{}",
+        memory.report().unwrap()
+    );
+}
+
+#[test]
+fn world_nodes_are_validated() {
+    let up = fake(vec![Up::Reply("x")]);
+    let addr = server_with(&up.url, Arc::new(Memory::in_memory()), true, true);
+    let bad = |target: String| {
+        let (f, extra) = send2(addr, &target);
+        assert_eq!((f.code, extra), (CODE_BAD_REQUEST, [0; 4]), "{target}");
+    };
+    let good = world_url(3001, 12, 0, 3, &baseline());
+    bad(good.replace("v=2", "v=1"));
+    bad(good.replace("&owners=%2E15", "&owners=%2E99999999999"));
+    bad(good.replace("&lords2=", "&lords3="));
+    let mut short = baseline();
+    short.owners.pop();
+    bad(world_url(3001, 12, 0, 3, &short));
+    let mut wars = baseline();
+    wars.wars[0] = 2;
+    bad(world_url(3001, 12, 0, 3, &wars));
+    bad(event_url(
+        3001,
+        11,
+        0,
+        3,
+        &LogEntry {
+            index: 0,
+            ..defeat()
+        },
+    ));
+    bad(event_url(
+        3001,
+        11,
+        0,
+        3,
+        &LogEntry {
+            actor: -2,
+            ..defeat()
+        },
+    ));
+    bad(tick_url(3001, 11, 0, 3, 0).replace("&head=0", ""));
+    bad(tick_url(3001, 11, 0, 3, 0).replace("camp=7", "camp=0"));
+    // A v1 route never answers with a v2 frame.
+    assert_eq!(
+        parse_frame(&get(addr, "/v1/result?v=1&rid=5&job=6&end=1")).code,
+        CODE_UNKNOWN_JOB
+    );
+}
+
+#[test]
+fn actions_are_validated_delivered_and_remembered() {
+    let up = fake(vec![
+        Up::Reply("Take this purse, and my thanks.\nACTION: give 100"),
+        Up::Reply("A fair question."),
+        Up::Reply("Absurd. [ACTION: give 900]"),
+        Up::Reply("Hm. ACTION: relation -2"),
+    ]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = server_with(&up.url, memory.clone(), true, false);
+    let lord = V2 {
+        troop: "trp_knight_1_1",
+        nname: "Count Klargus",
+        fac: "fac_kingdom_1",
+        fname: "Kingdom of Swadia",
+        occ: 2,
+        st: 0,
+        ..borcha("You fought well.")
+    };
+    // f=2, with gold: the reply carries the action in the v2 frame.
+    let url = |v: &V2, job: u32, extra: &str| {
+        v2_url(2000 + job, job, v).replace(
+            "&pname=",
+            &format!("&f=2&gold=1000&pgold=300{extra}&pname="),
+        )
+    };
+    let (f, extra) = send2(addr, &url(&lord, 1, ""));
+    assert_eq!((f.code, extra), (CODE_PENDING, [0; 4]));
+    wait_done2(addr, 1);
+    let (f, extra) = send2(addr, "/v1/result?v=1&rid=77&job=1&end=1");
+    assert_eq!(f, fr(77, CODE_READY, "Take this purse, and my thanks."));
+    assert_eq!(extra, [ACT_GIVE as i32, 100, troop("trp_knight_1_1"), 0]);
+    // The prompt offered the deeds, with the purses.
+    contains_all(
+        &up.messages(0)[0].1,
+        &[
+            "ACTION: <deed> <number>",
+            "you have about 1000 denars",
+            "Ylva carries 300 denars",
+        ],
+    );
+    // The player accepted (hres=1): the next talk says so, and memory keeps it.
+    let next = V2 {
+        conv: 101,
+        head: 1,
+        ..lord.clone()
+    };
+    send2(addr, &url(&next, 2, "&hres=1"));
+    wait_done2(addr, 2);
+    contains_all(
+        &up.messages(1)[0].1,
+        &["(you offered Ylva 100 denars; accepted)"],
+    );
+    // Too much for the purse, or a second gold action within three days: stripped, not sent.
+    send2(
+        addr,
+        &url(
+            &V2 {
+                conv: 102,
+                head: 2,
+                ..lord.clone()
+            },
+            3,
+            "",
+        ),
+    );
+    wait_done2(addr, 3);
+    let (f, extra) = send2(addr, "/v1/result?v=1&rid=77&job=3&end=1");
+    assert_eq!((f.text.as_str(), extra), ("Absurd.", [0; 4]));
+    // A game without f=2 gets v1 frames and no action, though the text is still clean.
+    get(
+        addr,
+        &v2_url(
+            2004,
+            4,
+            &V2 {
+                conv: 103,
+                head: 3,
+                ..lord.clone()
+            },
+        ),
+    );
+    wait_done(addr, 4);
+    let f = parse_frame(&get(addr, "/v1/result?v=1&rid=77&job=4&end=1"));
+    assert_eq!(f.text, "Hm.");
+    assert_eq!(memory.find(7, 4).unwrap().unwrap().action_kind, 0);
+    assert_eq!(memory.find(7, 1).unwrap().unwrap().action_kind, ACT_GIVE);
+}
+
+#[test]
+fn actions_can_be_turned_off() {
+    let up = fake(vec![Up::Reply("Hm.\nACTION: relation 2")]);
+    let addr = server_with(&up.url, Arc::new(Memory::in_memory()), false, false);
+    let url = v2_url(2001, 1, &borcha("Hello")).replace("&pname=", "&f=2&gold=10&pgold=10&pname=");
+    send2(addr, &url);
+    wait_done2(addr, 1);
+    let (f, extra) = send2(addr, "/v1/result?v=1&rid=77&job=1&end=1");
+    assert_eq!((f.text.as_str(), extra), ("Hm.", [0; 4]));
+    assert!(!up.messages(0)[0].1.contains("ACTION:"));
+}
+
+/// Waits until `character` has a plan on the chain that ends at `head`.
+fn wait_plan(memory: &Memory, head: u32, character: &str) -> Plan {
+    let start = Instant::now();
+    loop {
+        if let Some(p) = memory.latest_plan(7, head, character).unwrap() {
+            return p;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "no plan for {character}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+const PLAN: &str =
+    "{\"goal\": \"Keep Swadia whole.\", \"plan\": \"Watch Isolla and her friends.\", \
+    \"act\": {\"kind\": \"letter\", \"text\": \"Ylva, come to Praven. We should talk.\"}}";
+
+#[test]
+fn ticks_plan_in_the_background_and_deliver_initiatives() {
+    let up = fake(vec![
+        Up::ReplyOwned(PLAN.to_string()),
+        Up::Reply("Well met."),
+    ]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = server_with(&up.url, memory.clone(), true, true);
+    // Day 1: no initiative yet; planning is queued for the first unplanned ruler.
+    assert_eq!(
+        send2(addr, &tick_url(3001, 21, 0, 1, 0)),
+        (stored(), [0; 4])
+    );
+    let plan = wait_plan(&memory, 21, "trp_kingdom_1_lord");
+    assert_eq!(plan.goal, "Keep Swadia whole.");
+    let system = up.messages(0)[0].1.clone();
+    contains_all(
+        &system,
+        &[
+            "You are King Harlaus.",
+            "private mind of King Harlaus",
+            "\"goal\"",
+        ],
+    );
+    // Day 2: the letter is delivered with the tick.
+    let (f, extra) = send2(addr, &tick_url(3001, 22, 21, 2, 0));
+    assert_eq!(
+        f,
+        fr(3001, CODE_READY, "Ylva, come to Praven. We should talk.")
+    );
+    assert_eq!(
+        extra,
+        [INIT_LETTER as i32, 0, troop("trp_kingdom_1_lord"), 0]
+    );
+    // Retrying the same tick gives the same answer; the next tick does not repeat it.
+    assert_eq!(send2(addr, &tick_url(3001, 22, 21, 2, 0)).1, extra);
+    assert_eq!(send2(addr, &tick_url(3001, 23, 22, 3, 0)).1[0], 0);
+    // A save that reloaded before the plan (world head 0) never gets the letter.
+    assert_eq!(send2(addr, &tick_url(3001, 24, 0, 3, 0)).1[0], 0);
+    // Talking to Harlaus afterwards: he knows his aims and what he wrote.
+    let king = harlaus("You wrote to me?");
+    let url = v2_url(2001, 1, &king).replace("&pname=", "&whead=23&pname=");
+    get(addr, &url);
+    wait_done(addr, 1);
+    let talk = up.messages(up.hits() - 1)[0].1.clone();
+    contains_all(&talk, &[
+        "Your private aims (decided on day 1; reveal them only if it serves you):\n- Goal: Keep Swadia whole.",
+        "- Day 2: you wrote to Ylva: \"Ylva, come to Praven. We should talk.\"",
+    ]);
+}
+
+#[test]
+fn a_talk_preempts_background_planning() {
+    let up = fake(vec![Up::Hang, Up::Reply("Speak.")]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = server_with(&up.url, memory.clone(), true, true);
+    send2(addr, &tick_url(3001, 21, 0, 1, 0));
+    wait_until("planning reached the model", || up.hits() == 1);
+    let t0 = Instant::now();
+    assert_eq!(talk_v2(addr, 1, &borcha("Hello")).code, CODE_PENDING);
+    wait_until("planning socket closed", || up.closed() == 1);
+    assert_eq!(wait_done(addr, 1), fr(77, CODE_READY, "Speak."));
+    assert!(t0.elapsed() < Duration::from_secs(3));
+    assert_eq!(
+        memory.latest_plan(7, 21, "trp_kingdom_1_lord").unwrap(),
+        None
+    );
+}
+
+#[test]
+fn autonomy_can_be_turned_off_and_bad_plans_are_dropped() {
+    let up = fake(vec![Up::Reply("I refuse to answer in JSON.")]);
+    let memory = Arc::new(Memory::in_memory());
+    let off = server_with(&up.url, memory.clone(), true, false);
+    send2(off, &tick_url(3001, 21, 0, 1, 0));
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(up.hits(), 0);
+    let on = server_with(&up.url, memory.clone(), true, true);
+    send2(on, &tick_url(3001, 31, 0, 1, 0));
+    wait_until("planning ran", || up.hits() == 1);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        memory.latest_plan(7, 31, "trp_kingdom_1_lord").unwrap(),
+        None
+    );
+}
+
+#[test]
+fn fake_llm_plans_and_writes_letters() {
+    let runner = Runner {
+        backend: Backend::Canned {
+            delay: Duration::from_millis(10),
+            kind: Canned::Reply,
+        },
+        characters: shipped_characters(),
+        realms: shipped_realms(),
+        templates: shipped_templates(),
+        memory: Arc::new(Memory::in_memory()),
+        log_prompts: false,
+        actions: true,
+        autonomy: true,
+    };
+    let memory = runner.memory.clone();
+    let addr = serve(runner, limits(), npc::NPCS);
+    send2(addr, &tick_url(3001, 21, 0, 1, 0));
+    wait_plan(&memory, 21, "trp_kingdom_1_lord");
+    let (f, extra) = send2(addr, &tick_url(3001, 22, 21, 2, 0));
+    assert!(
+        f.text
+            .starts_with("[fake] King Harlaus writes to Ylva on day 1"),
+        "{f:?}"
+    );
+    assert_eq!(extra[0], INIT_LETTER as i32);
+    // The fake echoes an ACTION the player types, which is validated like any other.
+    let url = v2_url(2001, 1, &borcha("Here is my offer. ACTION: ask 50"))
+        .replace("&pname=", "&f=2&pgold=100&pname=");
+    send2(addr, &url);
+    wait_done2(addr, 1);
+    let (_, extra) = send2(addr, "/v1/result?v=1&rid=77&job=1&end=1");
+    assert_eq!(extra, [ACT_ASK as i32, 50, troop("trp_npc1"), 0]);
 }

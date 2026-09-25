@@ -171,7 +171,7 @@ callback are the same as in v1. A v1 client keeps working against a v2 server.
 ### Request URL
 
 ```
-/v2/talk?v=2&rid={regA}&job={regB}&camp={regE}&conv={regF}&head={regG}&troop={regH}&day={regD}&fac={regI}&pfac={regJ}&frel={regK}&rel={regL}&rep={regM}&occ={regN}&st={regO}&ren={regP}&hon={regQ}&loc={regR}&ldist={regS}&pg={regT}&wars={regU}&pname={s65}&nname={s50}&fname={s51}&pfname={s52}&lname={s53}&ruler={s54}&spouse={s55}&father={s56}&msg={s66}&end=1
+/v2/talk?v=2&rid={regA}&job={regB}&camp={regE}&conv={regF}&head={regG}&troop={regH}&day={regD}&fac={regI}&pfac={regJ}&frel={regK}&rel={regL}&rep={regM}&occ={regN}&st={regO}&ren={regP}&hon={regQ}&loc={regR}&ldist={regS}&pg={regT}&wars={regU}&f=2&whead={regV}&gold={regW}&pgold={regX}&hres={regY}&pname={s65}&nname={s50}&fname={s51}&pfname={s52}&lname={s53}&ruler={s54}&spouse={s55}&father={s56}&msg={s66}&end=1
 ```
 
 The template rules of v1 apply. `script_cai_store_context` fills reg43..reg59 and
@@ -293,3 +293,110 @@ Selection is deterministic. There are no embeddings or summaries, and records ar
 rewritten. The prompt (profile, live state, memories, rules and chat) is kept under
 12000 characters by dropping relevant memories, then recent ones, then the oldest turns
 of the conversation in progress.
+
+## Protocol v2, Milestones 4-6: world nodes, actions and initiatives
+
+### The v2 frame
+
+Every `/v2/event`, `/v2/world` and `/v2/tick` answer, and every answer about a `/v2/talk`
+sent with `f=2` (including `/v1/result` and `/v1/cancel` for that job), is a **v2 frame**:
+
+```
+R|C|T|K|N|W|X|R
+```
+
+It is the v1 frame with four integers before the trailing R, so the engine delivers
+`reg0 = R, reg1 = C, reg2..reg5 = K N W X, reg6 = R, s0 = T` (7 integers, 1 string). The
+callback accepts a frame as well-formed with 3 or 7 integers. K..X are 0 unless stated.
+Every rule for R, C and T is unchanged; the frame is at most 580 bytes. v1 routes, and v2
+talks without `f=2` (a mod built before Milestone 5), keep v1 frames.
+
+### World nodes (Milestone 4)
+
+The game's background sender (`script_cai_background_send`, one simple trigger that
+runs every map frame) sends at most one node at a time, only while the transport is idle
+and the talk window is closed:
+
+```
+/v2/event?v=2&rid={regA}&job={regB}&camp={regE}&whead={regV}&day={regD}&idx={regZ}&type={regAA}&time={regAB}&actor={regAC}&center={regAD}&clord={regAE}&cfac={regAF}&troop={regAG}&tfac={regAH}&fac={regAI}&pname={s65}&pfname={s52}&end=1
+/v2/world?v=2&rid={regA}&job={regB}&camp={regE}&whead={regV}&day={regD}&alive={regAJ}&pname={s65}&pfname={s52}&wars={s53}&owners={s54}&lords={s55}&lords2={s56}&end=1
+/v2/tick?v=2&rid={regA}&job={regB}&camp={regE}&whead={regV}&day={regD}&head={regG}&pname={s65}&pfname={s52}&end=1
+```
+
+(From here on, `{regX}` letters simply name registers; see the overlay for which register
+each stands for. `job` is the node's id, drawn like a job id.)
+
+- **`/v2/event`** forwards Native's log entry number `idx` (`$cai_log_sent + 1`, up to
+  `$num_log_entries`), read from the `trp_log_array_*` slots: type, time in hours,
+  actor, center, center lord, center faction, troop, troop faction, faction (indices,
+  -1 for none). The server turns it into one sentence using
+  `calradia-server/world/log_entries.toml` (one entry per `logent_*` type, with who is
+  involved, which realms it is news for, and its importance; noise and never-logged
+  types are skipped).
+- **`/v2/world`** is the daily snapshot: `alive` (bit k = realm `kingdoms_begin + k`
+  active), and lists of `.`-separated numbers (the game builds them digit by digit):
+  `wars` (1 per realm pair i < j at war, 21 values), `owners` (faction of each of the 70
+  walled centers), `lords` + `lords2` (faction * 2 + 1 if held prisoner, for the 132
+  kings, lords and claimants, in two halves). The server compares it with the previous
+  snapshot on the same chain and records what changed: wars and peace, realms falling or
+  rising, towns and castles changing hands, lords changing allegiance, lords captured or
+  released. The first snapshot is a baseline.
+- **`/v2/tick`** is the daily tick (Milestone 6, below). `head` is the conversation head.
+
+Each node's parent is `whead` (`$cai_world_head`), exactly like conversation turns: the
+game makes a node its world head only after the server answered READY, and that head is
+saved with the game, so a reloaded save knows only the events of its own past. A retried
+node (same id, same content) gets the same answer; the same id with other content is code
+4 `conflict`, and the game then draws a new id. After a failure the sender waits one game
+hour; a node rejected twice is skipped, so one bad entry cannot block the rest.
+
+`/v2/talk` carries `whead`. The talk's prompt then lists what the character knows
+(`world::recall`, at most 10, oldest first): events that involved them (their last 5),
+news of their realm (last 4), notable deeds of the player (last 3), and major events of
+the last 30 days (last 3).
+
+### Actions (Milestone 5)
+
+With `f=2`, a talk's prompt tells the character it may end its reply with one line
+`ACTION: <deed> <number>`: `relation -3..3` (its regard for the player), `give <denars>`
+(nobles only, from their purse), `ask <denars>` (from the player). The server strips the
+line from the spoken text and validates it (`calradia-server/src/actions.rs`):
+
+| Rule | Value |
+|---|---|
+| relation | 1..3 either way; at most 5 in total per character per game day |
+| give | 10..1000 denars; a noble (king, lord, claimant, lady) not held by the player, with at least twice that in `gold` |
+| ask | 10..5000 denars; the player carries at least that (`pgold`) |
+| gold cooldown | one give or ask per character per 3 game days |
+
+A valid action rides on the READY frame: `K` = `ACT_RELATION` 1 / `ACT_GIVE` 2 /
+`ACT_ASK` 3, `N` = amount, `W` = the character's troop. The game checks again that W is the
+character in the window. A relation change is carried out when the reply is shown; gold
+waits for **Accept** / **Refuse**. `script_cai_execute_action` (the only mod script that
+writes game state) re-checks the bounds and the purses and executes with vanilla
+operations and scripts. The outcome (`OUT_ACCEPTED` 1, `OUT_DECLINED` 2, `OUT_FAILED` 3)
+goes out with the next talk as `hres` and is stored on that turn, so memory records what
+each branch of the save did with the offer. `--no-actions` turns proposals off.
+
+### Initiatives (Milestone 6)
+
+A tick is a world node that also (a) may carry one **initiative** that a character
+decided on earlier, and (b) queues one planning task. Planning runs in the background and
+yields to any talk (a talk arriving stops it). It picks the stalest "important" character
+(a ruler or claimant with a profile, or anyone the player has spoken with), with no plan
+or a plan at least 7 days old on this chain. It asks the model, as that character's
+private mind, for JSON: a goal, a plan, and optionally one act:
+
+| Act | K | N | X | Game effect |
+|---|---|---|---|---|
+| letter | `INIT_LETTER` 10 | 0 | 0 | a letter to the player (`dialog_box`) |
+| attitude | `INIT_ATTITUDE` 11 | -2..2 | 0 | the character's regard for the player changes, with a letter |
+| rivalry | `INIT_RIVALRY` 12 | -2..2 | the other lord's troop | relation between the two lords changes; a rumour line is shown |
+
+T is the letter or rumour; W the character. Acts are validated when planned (bounds,
+text, a real target lord other than itself) and again by the game. An initiative is
+delivered only if it was decided on this save's chain, within 10 days, not already
+delivered on this chain, at most one per game day, and at most one per character per 5
+days. Plans and recent deeds go into that character's conversation prompt ("Your private
+aims", "What you did of your own accord lately"). `--no-autonomy` turns planning and
+delivery off. Defections, war declarations and army movements are not among the acts.

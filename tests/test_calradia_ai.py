@@ -62,8 +62,45 @@ NEW_VARIABLES = [
     b"cai_campaign",
     b"cai_mem_head",
     b"cai_conv_id",
+    b"cai_world_head",
+    b"cai_log_sent",
+    b"cai_bg_node",
+    b"cai_bg_kind",
+    b"cai_bg_rejects",
+    b"cai_bg_retry_hours",
+    b"cai_next_snapshot_hours",
+    b"cai_next_tick_hours",
+    b"cai_head_outcome",
+    b"cai_reply_act_kind",
+    b"cai_reply_act_amount",
+    b"cai_prop_kind",
+    b"cai_prop_amount",
+    b"cai_obj_accept",
+    b"cai_obj_decline",
 ]
-NEW_SCRIPTS = [b"cai_new_id", b"cai_tx_send", b"cai_store_npc_name", b"cai_store_context"]
+NEW_SCRIPTS = [
+    b"cai_new_id",
+    b"cai_tx_send",
+    b"cai_store_npc_name",
+    b"cai_store_context",
+    b"cai_store_player_realm",
+    b"cai_store_log_entry",
+    b"cai_store_snapshot",
+    b"cai_background_send",
+    b"cai_background_done",
+    b"cai_execute_initiative",
+    b"cai_execute_action",
+]
+# The only script of the mod that may change game state (Milestones 5 and 6).
+EXECUTOR = b"cai_execute_action"
+# What only the executor may do: move gold, change a lord's wealth slot, and call the vanilla
+# scripts that change relations.
+EXECUTOR_OPERATIONS = {"troop_set_slot", "troop_add_gold", "troop_remove_gold"}
+EXECUTOR_VANILLA_SCRIPTS = [
+    b"change_player_relation_with_troop",
+    b"troop_change_relation_with_troop",
+]
+SLOT_TROOP_WEALTH = 11
 CHANGED_SCRIPT = b"game_receive_url_response"
 NEW_PRESENTATION = b"prsnt_cai_talk"
 MENU_OPTION = b"mno_cai_talk"
@@ -72,9 +109,10 @@ MENU_OPTION = b"mno_cai_talk"
 NEW_DIALOGS = [(b"lord_talk", b"lord_pretalk"), (b"member_talk", b"member_pretalk")]
 
 # Files whose only permitted differences are renumbered quick-string operands.
-QSTR_ONLY = ["mission_templates.txt", "simple_triggers.txt", "triggers.txt"]
+QSTR_ONLY = ["mission_templates.txt", "triggers.txt"]
 CHANGED = {
     "conversation.txt",
+    "simple_triggers.txt",
     "menus.txt",
     "presentations.txt",
     "scripts.txt",
@@ -89,6 +127,15 @@ CHANGED = {
 # that writes troops, parties, factions, items, slots, quests or other game state.
 ALLOWED_OPERATIONS = {
     "troop_is_hero",
+    "troop_slot_ge",
+    "store_faction_of_party",
+    "store_troop_gold",
+    "store_current_hours",
+    "is_presentation_active",
+    "store_add",
+    "val_mul",
+    "dialog_box",
+    "display_message",
     "main_party_has_troop",
     "troop_slot_eq",
     "faction_slot_eq",
@@ -156,8 +203,13 @@ WRITES_FIRST_OPERAND = {
     "val_lshift",
     "store_sub",
     "store_mul",
+    "store_add",
+    "val_mul",
     "store_random_in_range",
     "store_current_day",
+    "store_current_hours",
+    "store_troop_gold",
+    "store_faction_of_party",
     "store_script_param",
     "store_trigger_param_1",
     "troop_get_slot",
@@ -169,7 +221,14 @@ WRITES_FIRST_OPERAND = {
 }
 # The vanilla globals the mod reads (never writes): the dialog partner, and the player's
 # kingdom, honour and homage for the live context of protocol v2.
-READ_VANILLA_GLOBALS = {b"g_talk_troop", b"players_kingdom", b"player_honor", b"player_has_homage"}
+# Milestone 4 also reads Native's log counter.
+READ_VANILLA_GLOBALS = {
+    b"g_talk_troop",
+    b"players_kingdom",
+    b"player_honor",
+    b"player_has_homage",
+    b"num_log_entries",
+}
 
 Op = tuple[int, list[int]]
 
@@ -332,6 +391,27 @@ def mod_code(mod: dict[str, bytes]) -> Iterator[tuple[str, list[Op]]]:
         header, conditions, _, _, consequences, _ = dialog_line(line)
         yield f"dialog {header[0].decode()} conditions", conditions
         yield f"dialog {header[0].decode()} consequences", consequences
+    yield "simple trigger", new_simple_trigger(mod)
+
+
+def simple_triggers(data: bytes) -> list[list[Op]]:
+    """simple_triggers.txt -> the operation block of each trigger."""
+    lines = [line for line in data.split(b"\n") if line.strip()]
+    count = int(lines[1])
+    result = []
+    for line in lines[2 : 2 + count]:
+        tokens = line.split()
+        ops, end = parse_block(tokens, 1)
+        assert end == len(tokens), line
+        result.append(ops)
+    return result
+
+
+def new_simple_trigger(mod: dict[str, bytes]) -> list[Op]:
+    vanilla = len(simple_triggers(golden("simple_triggers.txt")))
+    added = simple_triggers(mod["simple_triggers.txt"])[vanilla:]
+    assert len(added) == 1
+    return added[0]
 
 
 def new_dialog_lines(mod: dict[str, bytes]) -> list[bytes]:
@@ -478,16 +558,22 @@ def test_mod_code_uses_only_whitelisted_operations(mod: dict[str, bytes]) -> Non
     allowed = {by_name[name] for name in ALLOWED_OPERATIONS}
     variables = names(mod["variables.txt"])
     own_scripts = {script_index(mod, name) for name in NEW_SCRIPTS}
+    executor_vanilla = {script_index(mod, name) for name in EXECUTOR_VANILLA_SCRIPTS}
     own_presentation = presentation_index(mod, NEW_PRESENTATION)
     writes_first = {by_name[name] for name in WRITES_FIRST_OPERAND}
     assert writes_first <= allowed
+    executor_only = {by_name[name] for name in EXECUTOR_OPERATIONS}
+    assert not executor_only & allowed
     blocks = list(mod_code(mod))
-    assert len(blocks) == len(NEW_SCRIPTS) + 1 + 3 + 2 + 2 * len(NEW_DIALOGS)
+    assert len(blocks) == len(NEW_SCRIPTS) + 1 + 3 + 2 + 2 * len(NEW_DIALOGS) + 1
     read_globals = set()
     for where, ops in blocks:
         for opcode, args in ops:
             base = opcode & ~OPCODE_FLAGS
-            assert base in allowed, (where, opcode)
+            in_executor = where == f"script {EXECUTOR.decode()}"
+            assert base in allowed or (in_executor and base in executor_only), (where, opcode)
+            if base == by_name["troop_set_slot"]:
+                assert args[1] == SLOT_TROOP_WEALTH, where
             for k, arg in enumerate(args):
                 if tag(arg) != TAG_VARIABLE:
                     continue
@@ -498,10 +584,15 @@ def test_mod_code_uses_only_whitelisted_operations(mod: dict[str, bytes]) -> Non
                     read_globals.add(name)
     assert read_globals == READ_VANILLA_GLOBALS
     for where, ops in blocks:
+        in_executor = where == f"script {EXECUTOR.decode()}"
         for opcode, args in ops:
             base = opcode & ~OPCODE_FLAGS
             if base == by_name["call_script"]:
-                assert tag(args[0]) == TAG_SCRIPT and index(args[0]) in own_scripts, where
+                assert tag(args[0]) == TAG_SCRIPT, where
+                if index(args[0]) not in own_scripts:
+                    # Vanilla scripts that change state: only from the executor.
+                    assert in_executor, where
+                    assert index(args[0]) in executor_vanilla, where
             if base == by_name["start_presentation"]:
                 assert args == [(TAG_PRESENTATION << OP_NUM_VALUE_BITS) | own_presentation]
 
@@ -520,7 +611,7 @@ def test_send_message_to_url_only_in_cai_tx_send(mod: dict[str, bytes]) -> None:
         for opcode, _ in ops
         if opcode & ~OPCODE_FLAGS == SEND_MESSAGE_TO_URL
     ]
-    assert sends == [b"cai_tx_send"] * 4
+    assert sends == [b"cai_tx_send"] * 7
     # Every other compiled file is vanilla (checked above) and vanilla never sends:
     for path in sorted(SOURCE.glob("module_*.py")):
         code = [ln.split("#")[0] for ln in path.read_text(encoding="cp1254").splitlines()]
@@ -528,7 +619,7 @@ def test_send_message_to_url_only_in_cai_tx_send(mod: dict[str, bytes]) -> None:
     for path in sorted(OVERLAY.glob("module_*.py")):
         code = [ln.split("#")[0] for ln in path.read_text(encoding="cp1254").splitlines()]
         count = sum("send_message_to_url" in ln for ln in code)
-        assert count == (4 if path.name == "module_scripts.py" else 0), path.name
+        assert count == (7 if path.name == "module_scripts.py" else 0), path.name
 
 
 def test_reply_delivery_is_guarded_by_request_id(mod: dict[str, bytes]) -> None:
@@ -565,7 +656,7 @@ def test_url_templates_follow_the_protocol(mod: dict[str, bytes]) -> None:
     templates = overlay_templates()
     doc = PROTOCOL_DOC.read_text(encoding="utf-8")
     expected = re.findall(r"^(/v[12]/\S+)$", doc, re.M)
-    assert len(templates) == len(expected) == 4
+    assert len(templates) == len(expected) == 7
     registers: dict[str, str] = {}
     for template, pattern in zip(templates, expected, strict=True):
         prefix, _, path = template.partition("/v")
@@ -575,12 +666,12 @@ def test_url_templates_follow_the_protocol(mod: dict[str, bytes]) -> None:
         assert not set(template) & {"_", " ", "^"}
         # The doc's {regA}.. placeholders stand for one fixed register each.
         for placeholder, register in zip(
-            re.findall(r"\{reg[A-Z]\}", pattern),
+            re.findall(r"\{reg[A-Z]+\}", pattern),
             re.findall(r"\{reg\d+\}", route + path),
             strict=True,
         ):
             assert registers.setdefault(placeholder, register) == register
-        concrete = re.sub(r"\{reg[A-Z]\}", lambda m: registers[m[0]], pattern)
+        concrete = re.sub(r"\{reg[A-Z]+\}", lambda m: registers[m[0]], pattern)
         assert route + path == concrete
         params = path.partition("?")[2].split("&")
         version = "PROTOCOL_VERSION" if route == "/v1/" else "PROTOCOL_V2"
@@ -650,7 +741,13 @@ def strip_mod_blocks(lines: list[str]) -> list[str]:
 
 @pytest.mark.parametrize(
     "name",
-    ["module_dialogs.py", "module_game_menus.py", "module_presentations.py", "module_scripts.py"],
+    [
+        "module_dialogs.py",
+        "module_game_menus.py",
+        "module_presentations.py",
+        "module_scripts.py",
+        "module_simple_triggers.py",
+    ],
 )
 def test_overlay_sources_are_vanilla_outside_the_mod_blocks(name: str) -> None:
     base = (SOURCE / name).read_text(encoding="cp1254").splitlines()
@@ -723,3 +820,21 @@ def test_server_embeds_the_id_files_the_mod_uses() -> None:
     ids_rs = (REPO / "calradia-server" / "src" / "ids.rs").read_text()
     embedded = re.findall(r'include_str!\("\.\./\.\./game/module_system/(ID_\w+\.py)"\)', ids_rs)
     assert embedded == ["ID_troops.py", "ID_factions.py", "ID_parties.py"]
+
+
+# --- tests: the background sender (Milestones 4-6) --------------------------------------
+
+
+def test_one_simple_trigger_is_appended_and_only_calls_the_background_sender(
+    mod: dict[str, bytes], qmap: dict[int, int]
+) -> None:
+    a_lines = [line for line in golden("simple_triggers.txt").split(b"\n") if line.strip()]
+    b_lines = [line for line in mod["simple_triggers.txt"].split(b"\n") if line.strip()]
+    assert int(b_lines[1]) == int(a_lines[1]) + 1
+    for x, y in zip(a_lines, b_lines[: len(a_lines)], strict=True):
+        if x != a_lines[1]:
+            assert same_but_renumbered(x, y, qmap)
+    assert b_lines[len(a_lines) :][0].split()[0] == b"0.000000"  # every frame on the map
+    by_name = header_operations()
+    send = (TAG_SCRIPT << OP_NUM_VALUE_BITS) | script_index(mod, b"cai_background_send")
+    assert new_simple_trigger(mod) == [(by_name["call_script"], [send])]

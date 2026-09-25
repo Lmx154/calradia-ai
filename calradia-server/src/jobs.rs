@@ -6,9 +6,10 @@
 //! during I/O: an upstream socket that must be aborted is taken out of the state under the
 //! lock and shut down after the guard is dropped.
 
+use crate::planner::PlanTask;
 use crate::protocol::{
     Talk, CODE_BAD_REQUEST, CODE_BUSY, CODE_CANCELED, CODE_FAILED, CODE_PENDING, CODE_READY,
-    CODE_UNKNOWN_JOB, JOB_DEADLINE_SECS, JOB_TTL_SECS, MAX_JOBS, QUEUE_LEN, REASON_BUSY,
+    CODE_UNKNOWN_JOB, FRAME_V2, JOB_DEADLINE_SECS, JOB_TTL_SECS, MAX_JOBS, QUEUE_LEN, REASON_BUSY,
     REASON_CANCELED, REASON_CONFLICT, REASON_PENDING, REASON_SUPERSEDED, REASON_TIMEOUT,
     REASON_UNKNOWN_JOB,
 };
@@ -51,13 +52,32 @@ enum State {
     Pending,
     /// The model's raw reply. `frame` sanitizes it on every answer; the worker only lets a
     /// job become READY if that yields a text with a letter.
-    Ready(String),
+    Ready(Reply),
     Failed(&'static str),
     Canceled(&'static str),
 }
 
+/// A finished talk: the reply, and for a v2 frame the four integers `K|N|W|X` (an action:
+/// kind, amount, the NPC's troop, 0).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Reply {
+    pub text: String,
+    pub extra: [i32; 4],
+}
+
+impl Reply {
+    pub fn text(text: String) -> Reply {
+        Reply {
+            text,
+            extra: [0; 4],
+        }
+    }
+}
+
 struct Job {
     talk: Talk,
+    /// The game reads v2 frames for this job (`/v2/talk` with `f=2`).
+    frame2: bool,
     state: State,
     created: Instant,
     deadline: Instant,
@@ -81,15 +101,21 @@ impl Job {
     }
 
     fn answer(&self) -> Answer {
-        match &self.state {
+        let mut answer = match &self.state {
             State::Pending => Answer::token(CODE_PENDING, REASON_PENDING),
-            State::Ready(text) => Answer {
+            State::Ready(reply) => Answer {
                 code: CODE_READY,
-                text: text.clone(),
+                text: reply.text.clone(),
+                extra: Some(reply.extra),
             },
             State::Failed(reason) => Answer::token(CODE_FAILED, reason),
             State::Canceled(reason) => Answer::token(CODE_CANCELED, reason),
-        }
+        };
+        answer.extra = match self.frame2 {
+            true => Some(answer.extra.unwrap_or([0; 4])),
+            false => None,
+        };
+        answer
     }
 }
 
@@ -98,21 +124,35 @@ impl Job {
 pub struct Answer {
     pub code: u8,
     pub text: String,
+    /// `K|N|W|X` for a v2 frame; None for a v1 frame.
+    pub extra: Option<[i32; 4]>,
 }
 
 impl Answer {
-    fn token(code: u8, token: &str) -> Self {
+    pub fn token(code: u8, token: &str) -> Self {
         Answer {
             code,
             text: token.to_string(),
+            extra: None,
         }
     }
 }
 
-/// Everything the worker needs to run one job, copied out of the store.
+/// How long a planning task may take.
+pub const PLAN_DEADLINE: Duration = Duration::from_secs(120);
+
+/// What the worker runs: a talk, or (in the background) a planning task.
+#[derive(Clone, Debug)]
+pub enum Task {
+    Talk(Talk),
+    Plan(PlanTask),
+}
+
+/// Everything the worker needs to run one job, copied out of the store. Background tasks
+/// have id 0.
 pub struct WorkItem {
     pub id: u32,
-    pub talk: Talk,
+    pub task: Task,
     pub deadline: Instant,
 }
 
@@ -145,11 +185,17 @@ struct Running {
     id: u32,
     /// A clone of the upstream socket, for cancel-by-shutdown. None until connected.
     conn: Option<TcpStream>,
+    /// A background task, which yields to any talk.
+    background: bool,
+    /// The background task was stopped because a talk arrived.
+    preempted: bool,
 }
 
 struct Inner {
     jobs: HashMap<u32, Job>,
     queue: VecDeque<u32>,
+    /// Planning tasks: run only when no talk waits, at most one queued.
+    background: VecDeque<PlanTask>,
     running: Option<Running>,
 }
 
@@ -165,6 +211,7 @@ impl Store {
             inner: Mutex::new(Inner {
                 jobs: HashMap::new(),
                 queue: VecDeque::new(),
+                background: VecDeque::new(),
                 running: None,
             }),
             work: Condvar::new(),
@@ -255,10 +302,12 @@ impl Store {
             inner.queue.len() + 1,
             inner.jobs.len() + 1
         ));
+        let frame2 = matches!(&talk, Talk::V2(t) if t.frame == FRAME_V2);
         inner.jobs.insert(
             id,
             Job {
                 talk,
+                frame2,
                 state: State::Pending,
                 created: now,
                 deadline: now + self.limits.deadline,
@@ -266,8 +315,18 @@ impl Store {
             },
         );
         inner.queue.push_back(id);
+        // A talk never waits for a plan: stop the running background task.
+        if let Some(running) = inner.running.as_mut().filter(|r| r.background) {
+            log("background task preempted by a talk");
+            running.preempted = true;
+            kill.extend(running.conn.take());
+        }
         self.work.notify_one();
-        Answer::token(CODE_PENDING, REASON_PENDING)
+        let mut answer = Answer::token(CODE_PENDING, REASON_PENDING);
+        if frame2 {
+            answer.extra = Some([0; 4]);
+        }
+        answer
     }
 
     /// `/v1/result`.
@@ -347,11 +406,29 @@ impl Store {
                 ));
                 let item = WorkItem {
                     id,
-                    talk: job.talk.clone(),
+                    task: Task::Talk(job.talk.clone()),
                     deadline: job.deadline,
                 };
-                inner.running = Some(Running { id, conn: None });
+                inner.running = Some(Running {
+                    id,
+                    conn: None,
+                    background: false,
+                    preempted: false,
+                });
                 return item;
+            }
+            if let Some(task) = guard.background.pop_front() {
+                guard.running = Some(Running {
+                    id: 0,
+                    conn: None,
+                    background: true,
+                    preempted: false,
+                });
+                return WorkItem {
+                    id: 0,
+                    task: Task::Plan(task),
+                    deadline: now + PLAN_DEADLINE,
+                };
             }
             guard = self
                 .work
@@ -360,9 +437,31 @@ impl Store {
         }
     }
 
-    /// Whether job `id` is still waiting for its outcome.
+    /// Whether job `id` is still waiting for its outcome (id 0: the background task was
+    /// not preempted).
     pub fn is_pending(&self, id: u32) -> bool {
-        self.lock().jobs.get(&id).is_some_and(Job::is_pending)
+        let inner = self.lock();
+        if id == 0 {
+            return inner
+                .running
+                .as_ref()
+                .is_some_and(|r| r.background && !r.preempted);
+        }
+        inner.jobs.get(&id).is_some_and(Job::is_pending)
+    }
+
+    /// Queues a planning task, unless one is already queued or running. Returns whether it
+    /// was queued.
+    pub fn plan(&self, task: PlanTask) -> bool {
+        let mut inner = self.lock();
+        let busy =
+            !inner.background.is_empty() || inner.running.as_ref().is_some_and(|r| r.background);
+        if busy {
+            return false;
+        }
+        inner.background.push_back(task);
+        self.work.notify_one();
+        true
     }
 
     /// Worker: registers the connected upstream socket of the running job, so a cancel
@@ -372,9 +471,9 @@ impl Store {
         let clone = conn.try_clone();
         let mut guard = self.lock();
         let inner = &mut *guard;
-        let pending = inner.jobs.get(&id).is_some_and(Job::is_pending);
+        let pending = id == 0 || inner.jobs.get(&id).is_some_and(Job::is_pending);
         match &mut inner.running {
-            Some(running) if running.id == id && pending => {
+            Some(running) if running.id == id && pending && !running.preempted => {
                 match clone {
                     Ok(c) => running.conn = Some(c),
                     Err(e) => log(format!("job {id} cannot clone upstream socket: {e}")),
@@ -387,11 +486,18 @@ impl Store {
 
     /// Worker: records the outcome of the running job. A result for a job that has
     /// already left PENDING (canceled, superseded, timed out) is discarded.
-    fn finish(&self, id: u32, outcome: Result<String, Failure>) {
+    fn finish(&self, id: u32, outcome: Result<Reply, Failure>) {
+        if id == 0 {
+            if let Err(failure) = &outcome {
+                log(format!("background task failed: {failure}"));
+            }
+            self.lock().running = None;
+            return;
+        }
         // Decide READY or FAILED before taking the lock; sanitizing is pure CPU.
         let state = match outcome {
-            Ok(raw) => match sanitize_text(&raw) {
-                Ok(_) => State::Ready(raw),
+            Ok(reply) => match sanitize_text(&reply.text) {
+                Ok(_) => State::Ready(reply),
                 Err(reason) => State::Failed(reason),
             },
             Err(failure) => {
@@ -429,8 +535,8 @@ fn settle(inner: &mut Inner, id: u32, state: State, now: Instant) -> Option<TcpS
     }
     let ms = now.duration_since(job.created).as_millis();
     match &state {
-        State::Ready(raw) => {
-            let shown = sanitize_text(raw).unwrap_or_default();
+        State::Ready(reply) => {
+            let shown = sanitize_text(&reply.text).unwrap_or_default();
             log(format!(
                 "job {id} READY after {ms} ms: {:?}",
                 preview(&shown)
@@ -468,7 +574,7 @@ fn shut_down(conns: Vec<TcpStream>) {
 }
 
 /// Starts the single worker thread: it runs queued jobs one at a time.
-pub fn spawn_worker(store: Arc<Store>, runner: Runner) -> io::Result<thread::JoinHandle<()>> {
+pub fn spawn_worker(store: Arc<Store>, runner: Arc<Runner>) -> io::Result<thread::JoinHandle<()>> {
     thread::Builder::new()
         .name("worker".into())
         .spawn(move || loop {

@@ -192,8 +192,16 @@ CalradiaAI lets you talk to NPCs whose replies come from a local language model.
 - **Camp → Talk with Hrodvar.** is the Milestone 2 proof of concept: Hrodvar, a Nord
   sellsword riding with your company, who has no memory.
 
+- **World awareness, actions and autonomy** (Milestones 4-6): characters know the news
+  that concerns them (battles, sieges, wars, defections, captures), may propose a small
+  action in conversation (a change of regard, an offer or request of gold that you accept
+  or refuse), and important characters form goals and plans each day and act on their own
+  (letters, changes of attitude, rivalries). See
+  [`docs/world-actions-autonomy.md`](docs/world-actions-autonomy.md).
+
 Type a message and click **Say**. Vanilla dialogs, quests, recruitment and trading are
-unchanged; the model's words never change game state.
+unchanged. The model only proposes; every effect is validated by the server and again by
+the game's single executor script, and gold never moves without your consent.
 
 It has three parts:
 
@@ -205,7 +213,8 @@ vanilla file with small edits marked `# --- Calradia AI`:
 | `module_dialogs.py` | Appends the two "Speak freely." options (lords and companions). |
 | `module_game_menus.py` | Adds the "Talk with Hrodvar." camp option. |
 | `module_presentations.py` | Adds the `cai_talk` conversation window at the end of the list. |
-| `module_scripts.py` | Adds the protocol constants, `cai_new_id`, `cai_tx_send` (the only place that sends requests), `cai_store_npc_name`, `cai_store_context` (reads the live game state) and `game_receive_url_response`. |
+| `module_scripts.py` | Adds the protocol constants, `cai_new_id`, `cai_tx_send` (the only place that sends requests), `cai_store_npc_name`, `cai_store_context` (reads the live game state), the Milestone 4-6 scripts (`cai_background_send`, `cai_background_done`, `cai_store_log_entry`, `cai_store_snapshot`, `cai_store_player_realm`, `cai_execute_initiative`, and `cai_execute_action`, the only script that changes game state) and `game_receive_url_response`. |
+| `module_simple_triggers.py` | Appends one trigger that runs the background sender every map frame. |
 | `ID_scripts.py`, `ID_presentations.py` | The regenerated ID files, so the build needs only one pass. |
 | `variables.txt` | The vanilla global variables, followed by the mod's `cai_*` variables in a fixed order. |
 

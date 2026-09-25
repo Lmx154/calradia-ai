@@ -8,6 +8,7 @@ from module_constants import *
 import string
 # --- Calradia AI (milestone 2): shared constants live in module_scripts.py ---
 from module_scripts import (CAI_OP_TALK, CAI_OP_RESULT, CAI_OP_CANCEL,
+                            CAI_ACT_RELATION, CAI_ACT_GIVE, CAI_OUT_ACCEPTED, CAI_OUT_DECLINED,
                             CAI_CONV_IDLE, CAI_CONV_SUBMITTING, CAI_CONV_PENDING, CAI_CONV_READY,
                             CAI_CONV_FAILED, CAI_CONV_CANCELED,
                             CAI_POLL_MS, CAI_GIVE_UP_MS, CAI_STUCK_MS, CAI_RESET_MS)
@@ -13712,6 +13713,24 @@ presentations = [
       (position_set_y, pos1, 60),
       (overlay_set_position, "$cai_obj_close", pos1),
 
+      # Milestone 5: Accept / Refuse for a character's offer or request of money. A proposal
+      # left open by an earlier window counts as refused.
+      (try_begin),
+        (gt, "$cai_prop_kind", 0),
+        (assign, "$cai_head_outcome", CAI_OUT_DECLINED),
+        (assign, "$cai_prop_kind", 0),
+      (try_end),
+      (create_button_overlay, "$cai_obj_accept", "@Accept", tf_center_justify),
+      (position_set_x, pos1, 650),
+      (position_set_y, pos1, 105),
+      (overlay_set_position, "$cai_obj_accept", pos1),
+      (overlay_set_display, "$cai_obj_accept", 0),
+      (create_button_overlay, "$cai_obj_decline", "@Refuse", tf_center_justify),
+      (position_set_x, pos1, 820),
+      (position_set_y, pos1, 105),
+      (overlay_set_position, "$cai_obj_decline", pos1),
+      (overlay_set_display, "$cai_obj_decline", 0),
+
       (presentation_set_duration, 999999),
       ]),
 
@@ -13721,6 +13740,11 @@ presentations = [
       (call_script, "script_cai_store_npc_name"),
       (try_begin),
         (key_clicked, key_escape),
+        (try_begin),
+          (gt, "$cai_prop_kind", 0),
+          (assign, "$cai_head_outcome", CAI_OUT_DECLINED),
+          (assign, "$cai_prop_kind", 0),
+        (try_end),
         (presentation_set_duration, 0),
       (try_end),
 
@@ -13736,10 +13760,30 @@ presentations = [
           (eq, "$cai_conv_state", CAI_CONV_READY),
           (str_store_string, s60, "@You: {s64}^{s59}: {s67}"),
           (overlay_set_text, "$cai_obj_status", "@{s59} has answered."),
-          # The player has now seen this reply: it becomes the savegame's memory head.
+          # The player has now seen this reply: it becomes the savegame's memory head. An
+          # action proposed with it (milestone 5) is carried out now (a change of regard) or
+          # waits for Accept / Refuse (money); $cai_head_outcome tells the next talk.
           (try_begin),
             (gt, "$cai_talk_troop", 0),
             (assign, "$cai_mem_head", "$cai_conv_job"),
+            (assign, "$cai_head_outcome", 0),
+            (try_begin),
+              (eq, "$cai_reply_act_kind", CAI_ACT_RELATION),
+              (call_script, "script_cai_execute_action", CAI_ACT_RELATION, "$cai_reply_act_amount", "$cai_talk_troop", 0),
+              (assign, "$cai_head_outcome", reg0),
+            (else_try),
+              (gt, "$cai_reply_act_kind", 0),
+              (assign, "$cai_prop_kind", "$cai_reply_act_kind"),
+              (assign, "$cai_prop_amount", "$cai_reply_act_amount"),
+              (assign, reg1, "$cai_prop_amount"),
+              (try_begin),
+                (eq, "$cai_prop_kind", CAI_ACT_GIVE),
+                (overlay_set_text, "$cai_obj_status", "@{s59} offers you {reg1} denars."),
+              (else_try),
+                (overlay_set_text, "$cai_obj_status", "@{s59} asks you for {reg1} denars."),
+              (try_end),
+            (try_end),
+            (assign, "$cai_reply_act_kind", 0),
           (try_end),
         (else_try),
           (str_store_string, s60, "@You: {s64}^({s67})"),
@@ -13815,9 +13859,18 @@ presentations = [
         (try_end),
       (try_end),
 
-      # Fade the buttons that are not available now.
+      # Fade the buttons that are not available now; Accept / Refuse only with a proposal.
+      (try_begin),
+        (gt, "$cai_prop_kind", 0),
+        (overlay_set_display, "$cai_obj_accept", 1),
+        (overlay_set_display, "$cai_obj_decline", 1),
+      (else_try),
+        (overlay_set_display, "$cai_obj_accept", 0),
+        (overlay_set_display, "$cai_obj_decline", 0),
+      (try_end),
       (try_begin),
         (eq, "$cai_tx_rid", 0),
+        (eq, "$cai_prop_kind", 0),
         (neg|is_between, "$cai_conv_state", CAI_CONV_SUBMITTING, CAI_CONV_PENDING + 1),
         (neg|str_is_empty, s66),
         (overlay_set_alpha, "$cai_obj_say", 0xFF),
@@ -13842,6 +13895,7 @@ presentations = [
         (eq, ":object", "$cai_obj_say"),
         (try_begin),
           (eq, "$cai_tx_rid", 0),
+          (eq, "$cai_prop_kind", 0),
           (neg|is_between, "$cai_conv_state", CAI_CONV_SUBMITTING, CAI_CONV_PENDING + 1),
           (neg|str_is_empty, s66),
           # A character's memory is kept per campaign: the campaign id is drawn once, at the
@@ -13892,9 +13946,32 @@ presentations = [
           (val_add, "$cai_tx_abandoned", 1),
         (try_end),
       (else_try),
+        (eq, ":object", "$cai_obj_accept"),
+        (gt, "$cai_prop_kind", 0),
+        (call_script, "script_cai_execute_action", "$cai_prop_kind", "$cai_prop_amount", "$cai_talk_troop", 0),
+        (assign, "$cai_head_outcome", reg0),
+        (assign, "$cai_prop_kind", 0),
+        (try_begin),
+          (eq, reg0, CAI_OUT_ACCEPTED),
+          (overlay_set_text, "$cai_obj_status", "@Done."),
+        (else_try),
+          (overlay_set_text, "$cai_obj_status", "@That cannot be done."),
+        (try_end),
+      (else_try),
+        (eq, ":object", "$cai_obj_decline"),
+        (gt, "$cai_prop_kind", 0),
+        (assign, "$cai_head_outcome", CAI_OUT_DECLINED),
+        (assign, "$cai_prop_kind", 0),
+        (overlay_set_text, "$cai_obj_status", "@You refused."),
+      (else_try),
         (eq, ":object", "$cai_obj_close"),
         # The conversation is discarded. A request in flight keeps the transport busy
-        # until its callback arrives.
+        # until its callback arrives. An open proposal counts as refused.
+        (try_begin),
+          (gt, "$cai_prop_kind", 0),
+          (assign, "$cai_head_outcome", CAI_OUT_DECLINED),
+          (assign, "$cai_prop_kind", 0),
+        (try_end),
         (presentation_set_duration, 0),
       (try_end),
       ]),

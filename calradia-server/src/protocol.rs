@@ -1,4 +1,4 @@
-//! Protocol v1: constants, the response frame and `/v1` request validation
+//! Protocols v1 and v2: constants, the response frames and request validation
 //! (docs/protocol-v1.md).
 //!
 //! This file is the source of truth for the protocol's numbers. The mod mirrors them and
@@ -48,6 +48,33 @@ pub const ST_PLAYER_RULER: u32 = 256;
 /// through `fac_kingdom_6` (bit 6), as in module_constants.py kingdoms_begin..kingdoms_end.
 pub const WARS_MAX: u32 = 127;
 
+// Frames. A v2 frame carries four more integers: `R|C|T|K|N|W|X|R`.
+pub const FRAME_V2: u32 = 2;
+// The integers in each frame, which the game's callback checks (mirrored by the mod).
+#[allow(dead_code)]
+pub const FRAME_V1_INTS: u32 = 3;
+#[allow(dead_code)]
+pub const FRAME_V2_INTS: u32 = 7;
+
+// Actions a character may propose in a talk (K of a v2 talk frame; Milestone 5).
+pub const ACT_RELATION: u32 = 1;
+pub const ACT_GIVE: u32 = 2;
+pub const ACT_ASK: u32 = 3;
+pub const ACT_MAX_RELATION: i32 = 3;
+pub const ACT_MIN_GOLD: i32 = 10;
+pub const ACT_MAX_GIVE: i32 = 1000;
+pub const ACT_MAX_ASK: i32 = 5000;
+// What became of a proposal (`hres=`): accepted, declined, or refused by the game's checks.
+pub const OUT_ACCEPTED: u32 = 1;
+pub const OUT_DECLINED: u32 = 2;
+pub const OUT_FAILED: u32 = 3;
+
+// Initiatives a character takes on its own (K of a tick frame; Milestone 6).
+pub const INIT_LETTER: u32 = 10;
+pub const INIT_ATTITUDE: u32 = 11;
+pub const INIT_RIVALRY: u32 = 12;
+pub const INIT_MAX_RELATION: i32 = 2;
+
 pub const JOB_DEADLINE_SECS: u64 = 90;
 pub const GAME_GIVE_UP_SECS: u64 = 120;
 pub const JOB_TTL_SECS: u64 = 600;
@@ -61,6 +88,9 @@ pub const ROUTE_TALK: &str = "/v1/talk";
 pub const ROUTE_RESULT: &str = "/v1/result";
 pub const ROUTE_CANCEL: &str = "/v1/cancel";
 pub const ROUTE_TALK_V2: &str = "/v2/talk";
+pub const ROUTE_EVENT: &str = "/v2/event";
+pub const ROUTE_WORLD: &str = "/v2/world";
+pub const ROUTE_TICK: &str = "/v2/tick";
 
 // Reason tokens: T for every code except READY.
 pub const REASON_PENDING: &str = "pending";
@@ -80,6 +110,8 @@ pub const REASON_UNKNOWN_JOB: &str = "unknown_job";
 pub const REASON_BUSY: &str = "busy";
 pub const REASON_MEMORY_UNAVAILABLE: &str = "memory_unavailable";
 pub const REASON_MEMORY_ERROR: &str = "memory_error";
+/// T of a READY answer to `/v2/event`, `/v2/world` and a tick without an initiative.
+pub const TEXT_STORED: &str = "stored";
 
 // The game must outwait the server's deadline, or it would give up on jobs that can
 // still finish.
@@ -98,6 +130,17 @@ pub fn frame(rid: u32, code: u8, text: &str) -> String {
     match sanitize_text(text) {
         Ok(t) => format!("{rid}|{code}|{t}|{rid}"),
         Err(reason) => format!("{rid}|{CODE_FAILED}|{reason}|{rid}"),
+    }
+}
+
+/// Builds a v2 response body `R|C|T|K|N|W|X|R`: the v1 frame with four integers before the
+/// trailing R. Only v2 requests (and results of v2 talks that asked for it) get one.
+pub fn frame_v2(rid: u32, code: u8, text: &str, extra: [i32; 4]) -> String {
+    let rid = if rid <= RID_MAX { rid } else { 0 };
+    let [k, n, w, x] = extra;
+    match sanitize_text(text) {
+        Ok(t) => format!("{rid}|{code}|{t}|{k}|{n}|{w}|{x}|{rid}"),
+        Err(reason) => format!("{rid}|{CODE_FAILED}|{reason}|0|0|0|0|{rid}"),
     }
 }
 
@@ -148,6 +191,10 @@ pub struct GameContext {
     pub ruler_name: String,
     pub spouse_name: String,
     pub father_name: String,
+    /// Milestone 5 (optional): the NPC's wealth (`slot_troop_wealth` for lords, gold for
+    /// others) and the player's gold.
+    pub npc_gold: Option<i32>,
+    pub player_gold: Option<i32>,
 }
 
 /// The validated parameters of a `/v2/talk`.
@@ -164,6 +211,12 @@ pub struct TalkV2 {
     pub character: String,
     pub context: GameContext,
     pub msg: String,
+    /// `f=2`: the game reads v2 frames, so results may carry an action (Milestone 5).
+    pub frame: u32,
+    /// The save's world head (`$cai_world_head`, Milestone 4), if sent.
+    pub world_head: Option<u32>,
+    /// What became of the head turn's proposal (`OUT_*`, 0 = none or unknown).
+    pub head_outcome: u32,
 }
 
 impl TalkV2 {
@@ -179,11 +232,72 @@ pub enum Talk {
     V2(Box<TalkV2>),
 }
 
+/// A Native log entry (`script_add_log_entry`), as forwarded by the game.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct LogEntry {
+    /// `$num_log_entries` when it was written: 1, 2, ...
+    pub index: u32,
+    pub kind: u32,
+    /// `store_current_hours` when it was written.
+    pub hours: u32,
+    pub actor: i32,
+    pub center: i32,
+    pub center_lord: i32,
+    pub center_faction: i32,
+    pub troop: i32,
+    pub troop_faction: i32,
+    pub faction: i32,
+}
+
+/// The daily world snapshot (Milestone 4): the state the server compares day by day.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct Snapshot {
+    /// Bit k: realm kingdoms_begin + k is active.
+    pub alive: u32,
+    /// For each pair (i < j) of the 7 realms, in order: 1 if at war.
+    pub wars: Vec<u32>,
+    /// Owner faction of each walled center, towns then castles.
+    pub owners: Vec<u32>,
+    /// For each king, lord and claimant: faction * 2 + 1 if held prisoner.
+    pub lords: Vec<u32>,
+}
+
+/// What a world node carries.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub enum Payload {
+    Log(LogEntry),
+    Snapshot(Snapshot),
+    /// The daily tick; `head` is the save's conversation head, for planning.
+    Tick {
+        head: u32,
+    },
+}
+
+/// A node of a savegame's world chain: `/v2/event`, `/v2/world` or `/v2/tick`.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WorldNode {
+    pub campaign: u32,
+    /// The game's id for the node (the request's `job`), and its parent (`whead`).
+    pub node: u32,
+    pub parent: u32,
+    pub day: u32,
+    pub player_name: String,
+    pub player_faction_name: String,
+    pub payload: Payload,
+}
+
+impl WorldNode {
+    pub fn fingerprint(&self) -> String {
+        serde_json::to_string(self).expect("serializable")
+    }
+}
+
 #[derive(Debug)]
 pub enum Op {
     Talk(Box<Talk>),
     Result,
     Cancel,
+    World(Box<WorldNode>),
 }
 
 /// A valid request.
@@ -217,7 +331,7 @@ pub fn parse(req: &Request, npcs: &'static [Npc]) -> Result<V1Request, Rejection
     }
     let version = match req.path.as_str() {
         ROUTE_TALK | ROUTE_RESULT | ROUTE_CANCEL => PROTOCOL_VERSION,
-        ROUTE_TALK_V2 => PROTOCOL_V2,
+        ROUTE_TALK_V2 | ROUTE_EVENT | ROUTE_WORLD | ROUTE_TICK => PROTOCOL_V2,
         _ => return reject(REASON_BAD_PARAM),
     };
     if req.param("end") != Some("1") {
@@ -262,7 +376,11 @@ pub fn parse(req: &Request, npcs: &'static [Npc]) -> Result<V1Request, Rejection
             Op::Talk(Box::new(Talk::V2(Box::new(talk))))
         }
         ROUTE_RESULT => Op::Result,
-        _ => Op::Cancel,
+        ROUTE_CANCEL => Op::Cancel,
+        _ => match parse_world_node(req, job) {
+            Some(node) => Op::World(Box::new(node)),
+            None => return reject(REASON_BAD_PARAM),
+        },
     };
     Ok(V1Request { rid, job, op })
 }
@@ -309,6 +427,8 @@ fn parse_v2_metadata(req: &Request) -> Option<TalkV2> {
         ruler_name: name(req, "ruler", MAX_NAME),
         spouse_name: name(req, "spouse", MAX_NAME),
         father_name: name(req, "father", MAX_NAME),
+        npc_gold: optional(req, "gold", |_| int("gold"))?,
+        player_gold: optional(req, "pgold", |_| int("pgold"))?,
     };
     Some(TalkV2 {
         campaign: parse_id(req.param("camp"))?,
@@ -318,6 +438,105 @@ fn parse_v2_metadata(req: &Request) -> Option<TalkV2> {
         character: character.to_string(),
         context,
         msg: String::new(),
+        frame: optional(req, "f", |_| {
+            uint("f").filter(|f| (1..=FRAME_V2).contains(f))
+        })?
+        .unwrap_or(1),
+        world_head: optional(req, "whead", |_| {
+            parse_uint(req.param("whead")).filter(|&h| h <= RID_MAX)
+        })?,
+        head_outcome: optional(req, "hres", |_| uint("hres").filter(|&o| o <= OUT_FAILED))?
+            .unwrap_or(0),
+    })
+}
+
+/// An optional field: absent is `Some(None)`; present but invalid is None (a bad request).
+fn optional<T>(req: &Request, key: &str, parse: impl Fn(&str) -> Option<T>) -> Option<Option<T>> {
+    match req.param(key) {
+        None => Some(None),
+        Some(v) => parse(v).map(Some),
+    }
+}
+
+/// A `.`-separated list of unsigned integers (the game builds it digit by digit, so it
+/// starts with a `.`), of exactly `len` values.
+fn parse_list(s: Option<&str>, len: usize) -> Option<Vec<u32>> {
+    let values: Option<Vec<u32>> = s?
+        .strip_prefix('.')?
+        .split('.')
+        .map(|v| parse_uint(Some(v)))
+        .collect();
+    values.filter(|v| v.len() == len)
+}
+
+/// The realms of a snapshot (`kingdoms_begin`..`kingdoms_end`), and the numbers of
+/// walled centers and of kings, lords and claimants, from the ID files.
+pub fn snapshot_shape() -> (usize, usize, usize) {
+    let ids = ids::ids();
+    let span = |t: &ids::Table, a: &str, b: &str| {
+        (t.index(b).expect("vanilla id") - t.index(a).expect("vanilla id")) as usize
+    };
+    (
+        span(
+            &ids.factions,
+            "fac_player_supporters_faction",
+            "fac_kingdoms_end",
+        ),
+        span(&ids.parties, "p_town_1", "p_village_1"),
+        span(&ids.troops, "trp_kingdom_1_lord", "trp_knight_1_1_wife"),
+    )
+}
+
+/// `/v2/event`, `/v2/world` or `/v2/tick`: None if anything is missing or out of range.
+fn parse_world_node(req: &Request, node: u32) -> Option<WorldNode> {
+    let int = |k: &str| parse_int(req.param(k)).filter(|n| n.abs() <= MAX_STAT);
+    let uint = |k: &str| int(k).and_then(|n| u32::try_from(n).ok());
+    // Log fields are indices, or -1 for none.
+    let field = |k: &str| int(k).filter(|&n| n >= -1);
+    let payload = match req.path.as_str() {
+        ROUTE_EVENT => Payload::Log(LogEntry {
+            index: uint("idx").filter(|&i| i >= 1)?,
+            kind: uint("type")?,
+            hours: uint("time")?,
+            actor: field("actor")?,
+            center: field("center")?,
+            center_lord: field("clord")?,
+            center_faction: field("cfac")?,
+            troop: field("troop")?,
+            troop_faction: field("tfac")?,
+            faction: field("fac")?,
+        }),
+        ROUTE_WORLD => {
+            let (realms, centers, lords) = snapshot_shape();
+            let pairs = realms * (realms - 1) / 2;
+            let wars = parse_list(req.param("wars"), pairs)?;
+            if wars.iter().any(|&w| w > 1) {
+                return None;
+            }
+            Payload::Snapshot(Snapshot {
+                alive: uint("alive").filter(|&a| a < 1 << realms)?,
+                wars,
+                owners: parse_list(req.param("owners"), centers)?,
+                // Sent in two halves, so no string the game builds grows too long.
+                lords: {
+                    let mut first = parse_list(req.param("lords"), lords / 2)?;
+                    first.extend(parse_list(req.param("lords2"), lords - lords / 2)?);
+                    first
+                },
+            })
+        }
+        _ => Payload::Tick {
+            head: parse_uint(req.param("head")).filter(|&h| h <= RID_MAX)?,
+        },
+    };
+    Some(WorldNode {
+        campaign: parse_id(req.param("camp"))?,
+        node,
+        parent: parse_uint(req.param("whead")).filter(|&h| h <= RID_MAX)?,
+        day: parse_day(req)?,
+        player_name: name(req, "pname", MAX_PNAME),
+        player_faction_name: name(req, "pfname", MAX_NAME),
+        payload,
     })
 }
 
