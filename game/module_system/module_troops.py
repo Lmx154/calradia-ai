@@ -51,7 +51,7 @@ from ID_scenes import *
 # wp_one_handed () | wp_two_handed () | wp_polearm () | wp_archery () | wp_crossbow () | wp_throwing ()
 def wp(x):
   n = 0
-  r = 10 + int(x / 10)
+  r = 10 + x // 10
 #  n |= wp_one_handed(x + random.randrange(r))
 #  n |= wp_two_handed(x + random.randrange(r))
 #  n |= wp_polearm(x + random.randrange(r))
@@ -88,7 +88,7 @@ def wpex(o,w,p,a,c,t):
    
 def wp_melee(x):
   n = 0
-  r = 10 + int(x / 10)
+  r = 10 + x // 10
 #  n |= wp_one_handed(x + random.randrange(r))
 #  n |= wp_two_handed(x + random.randrange(r))
 #  n |= wp_polearm(x + random.randrange(r))

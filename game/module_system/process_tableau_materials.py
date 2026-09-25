@@ -8,7 +8,7 @@ from process_common import *
 from process_operations import *
 
 def save_tableau_materials(variable_list,variable_uses,tag_uses,quick_strings):
-  ofile = open(export_dir + "tableau_materials.txt","w")
+  ofile = open(export_dir + "tableau_materials.txt","w", encoding="cp1254")
   ofile.write("%d\n"%(len(tableaus)))
   for tableau in tableaus:
     ofile.write("tab_%s %d %s %d %d %d %d %d %d"%(tableau[0], tableau[1], tableau[2], tableau[3], tableau[4], tableau[5], tableau[6], tableau[7], tableau[8]))
@@ -17,12 +17,12 @@ def save_tableau_materials(variable_list,variable_uses,tag_uses,quick_strings):
   ofile.close()
 
 def save_python_header():
-  ofile = open("./ID_tableau_materials.py","w")
-  for i_tableau in xrange(len(tableaus)):
+  ofile = open("./ID_tableau_materials.py","w", encoding="cp1254")
+  for i_tableau in range(len(tableaus)):
     ofile.write("tableau_%s = %d\n"%(tableaus[i_tableau][0],i_tableau))
   ofile.close()
 
-print "Exporting tableau materials data..."
+print("Exporting tableau materials data...")
 save_python_header()
 variable_uses = []
 variables = load_variables(export_dir, variable_uses)

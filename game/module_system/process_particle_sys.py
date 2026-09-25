@@ -26,7 +26,7 @@ def save_psys_keys(ofile, keys1, keys2):
     ofile.write("%f %f   %f %f\n"%(keys1[0], keys1[1], keys2[0], keys2[1]))
 
 def save_particle_systems():
-  ofile = open(export_dir + "particle_systems.txt","w")
+  ofile = open(export_dir + "particle_systems.txt","w", encoding="cp1254")
   ofile.write("particle_systemsfile version 1\n")
   ofile.write("%d\n"%len(particle_systems))
   for psys in particle_systems:
@@ -52,11 +52,11 @@ def save_particle_systems():
   ofile.close()
 
 def save_python_header():
-  ofile = open("./ID_particle_systems.py","w")
-  for i_particle_system in xrange(len(particle_systems)):
+  ofile = open("./ID_particle_systems.py","w", encoding="cp1254")
+  for i_particle_system in range(len(particle_systems)):
     ofile.write("psys_%s = %d\n"%(particle_systems[i_particle_system][0],i_particle_system))
   ofile.close()
 
-print "Exporting particle data..."
+print("Exporting particle data...")
 save_particle_systems()
 save_python_header()

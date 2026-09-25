@@ -26,7 +26,7 @@ def write_vec(file,vec):
   file.write(" %f %f %f "%vec)
   
 def save_ground_specs():
-  file = open("./ground_specs.txt","w")
+  file = open("./ground_specs.txt","w", encoding="cp1254")
   for ground_spec in ground_specs:
     file.write(" %s %d %s %f %s"%(ground_spec[0],ground_spec[1],ground_spec[2],ground_spec[3],ground_spec[4]))
     if (ground_spec[1] & gtf_has_color):
@@ -35,7 +35,7 @@ def save_ground_specs():
   file.close()
 
 def save_c_header():
-  file = open("./ground_spec_codes.h","w")
+  file = open("./ground_spec_codes.h","w", encoding="cp1254")
   file.write("#ifndef _GROUND_SPEC_CODES_H\n")
   file.write("#define _GROUND_SPEC_CODES_H\n\n")
   file.write("typedef enum {\n")
@@ -48,14 +48,14 @@ def save_c_header():
   file.close()
   
 def save_python_header():
-  file = open("../Module_system/header_ground_types.py","w")
-  for ig in xrange(len(ground_specs)):
+  file = open("../Module_system/header_ground_types.py","w", encoding="cp1254")
+  for ig in range(len(ground_specs)):
     ground_spec = ground_specs[ig]
     file.write("ground_%s = %d\n"%(ground_spec[0], ig))
   file.write("\n\n")
   file.close()
 
-print "Exporting ground_spec data..."
+print("Exporting ground_spec data...")
 save_ground_specs()
 save_c_header()
 save_python_header()

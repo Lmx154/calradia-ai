@@ -8,7 +8,7 @@ from process_common import *
 from process_operations import *
 
 def save_presentations(variable_list,variable_uses,tag_uses,quick_strings):
-  ofile = open(export_dir + "presentations.txt","w")
+  ofile = open(export_dir + "presentations.txt","w", encoding="cp1254")
   ofile.write("presentationsfile version 1\n")
   ofile.write(" %d\n"%(len(presentations)))
   for presentation in presentations:
@@ -19,12 +19,12 @@ def save_presentations(variable_list,variable_uses,tag_uses,quick_strings):
 
 
 def save_python_header():
-  file = open("./ID_presentations.py","w")
-  for i_presentation in xrange(len(presentations)):
+  file = open("./ID_presentations.py","w", encoding="cp1254")
+  for i_presentation in range(len(presentations)):
     file.write("prsnt_%s = %d\n"%(presentations[i_presentation][0],i_presentation))
   file.close()
 
-print "Exporting presentations..."
+print("Exporting presentations...")
 save_python_header()
 variable_uses = []
 variables = load_variables(export_dir,variable_uses)

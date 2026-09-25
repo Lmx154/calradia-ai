@@ -43,7 +43,7 @@ def carries_goods(x):
 def carries_gold(x):
   if (x > 10000): x =10000
   if (x < 0): x = 0
-  return ((big_num | (x / pf_carry_gold_multiplier)) << pf_carry_gold_bits) & pf_carry_gold_mask
+  return ((big_num | (x // pf_carry_gold_multiplier)) << pf_carry_gold_bits) & pf_carry_gold_mask
 
 pmf_is_prisoner = 0x0001
 

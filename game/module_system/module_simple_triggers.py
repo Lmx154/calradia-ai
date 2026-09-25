@@ -2405,7 +2405,7 @@ simple_triggers = [
   (2,
    [
        (store_troop_gold, ":total_value", "trp_player"),
-       (store_div, ":bandit_attraction", ":total_value", (10000/100)), #10000 gold = excellent_target
+       (store_div, ":bandit_attraction", ":total_value", (10000//100)), #10000 gold = excellent_target
 
        (troop_get_inventory_capacity, ":inv_size", "trp_player"),
        (try_for_range, ":i_slot", 0, ":inv_size"),

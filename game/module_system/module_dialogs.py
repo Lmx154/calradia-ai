@@ -14410,7 +14410,7 @@ Hand over my {reg19} denars, if you please, and end our business together.", "lo
   [anyone,"lord_mercenary_elaborate_castle", [(troop_get_type, ":type", "trp_player"),(eq, ":type", 1),
   (faction_slot_eq, "$g_talk_troop_faction", slot_faction_leader, "$g_talk_troop")
   ],
-   "Only my loyal vassals can own lands and castles in my realm -- and all my vassals are men.\I am not inclined to depart from this tradition without a very good reason. If you prove yourself in battle, you can swear an oath of homage to me and become my vassal.\We may then discuss how you may obtain a castle.",
+   "Only my loyal vassals can own lands and castles in my realm -- and all my vassals are men.\\I am not inclined to depart from this tradition without a very good reason. If you prove yourself in battle, you can swear an oath of homage to me and become my vassal.\\We may then discuss how you may obtain a castle.",
    "lord_mercenary_elaborate_1", []],
 
   [anyone,"lord_mercenary_elaborate_castle", [(troop_get_type, ":type", "trp_player"),(eq, ":type", 1),

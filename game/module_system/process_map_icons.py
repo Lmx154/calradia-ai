@@ -6,7 +6,7 @@ from process_common import *
 from process_operations import *
 
 def save_map_icons(variable_list,variable_uses,tag_uses,quick_strings):
-  ofile = open(export_dir + "map_icons.txt","w")
+  ofile = open(export_dir + "map_icons.txt","w", encoding="cp1254")
   ofile.write("map_icons_file version 1\n")
   ofile.write("%d\n"%len(map_icons))
   for map_icon in map_icons:
@@ -24,12 +24,12 @@ def save_map_icons(variable_list,variable_uses,tag_uses,quick_strings):
   ofile.close()
 
 def save_python_header():
-  ofile = open("./ID_map_icons.py","w")
-  for i_map_icon in xrange(len(map_icons)):
+  ofile = open("./ID_map_icons.py","w", encoding="cp1254")
+  for i_map_icon in range(len(map_icons)):
     ofile.write("icon_%s = %d\n"%(map_icons[i_map_icon][0],i_map_icon))
   ofile.close()
 
-print "Exporting map icons..."
+print("Exporting map icons...")
 save_python_header()
 variable_uses = []
 variables = load_variables(export_dir,variable_uses)
