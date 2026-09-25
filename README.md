@@ -207,7 +207,8 @@ generates. It talks to an OpenAI-compatible endpoint, and the NPC registry is in
 `calradia-qwen3.5-9b` (Qwen3.5 9B Uncensored, Q6_K) at `http://172.17.0.1:8080/v1`.
 Override them with `--upstream`/`CALRADIA_UPSTREAM` and `--model`/`CALRADIA_MODEL`.
 
-To run it:
+To run it, close Warband before building or installing the mod. Changing module files
+during a session can leave saves unusable; the game loads the files only at startup.
 
 ```bash
 GAME=~/.steam/steam/steamapps/common/"MountBlade Warband"
@@ -217,6 +218,21 @@ cargo run --release --manifest-path calradia-server/Cargo.toml   # listens on 12
 ```
 
 Start a **new game**. Saves from older mod versions are not supported.
+
+If a request hangs, the window shows a red warning after 5 seconds. Restart
+`calradia-server` to release it. If a busy flag survives closing and reopening the
+window, **Reset** appears after 15 seconds; restart the server before clicking it.
+**Cancel** stops waiting for the reply and sends the cancellation when the transport
+is free.
+
+For manual tests, build the server with
+`cargo build --offline --release --manifest-path calradia-server/Cargo.toml`, then run
+`calradia-server/target/release/calradia-server --fake-llm` for a canned reply after
+1.5 seconds. `--fault MODE` injects failures (`hang`, `close`, `empty`, `wrong-rid`,
+`malformed`, `delay`) or test text (`oversize-3000`, `nonascii`). Use
+`--fake-llm --deadline-secs 1` to test a model timeout. Run one server at a time on
+port 8766, restarting it between tests; see the
+[manual acceptance checklist](docs/http-ipc.md#milestone-2-acceptance-tests).
 
 Further reading:
 - [`docs/protocol-v1.md`](docs/protocol-v1.md): the game↔server contract.

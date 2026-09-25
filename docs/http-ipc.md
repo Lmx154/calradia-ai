@@ -91,6 +91,48 @@ ids, submit/poll/cancel jobs, and one sanitizer.
 - **Logical cancel works as designed.** The owed `/v1/cancel` arrived about 0.6 s after
   the talk, the job became CANCELED, and the model's late result was discarded.
   **[live]**
+- **Normal conversation and history.** Submit, poll and reply worked with Hrodvar;
+  the window retained the last four exchanges, newest first. **[live]**
+- **Hung-server recovery (E2).** The red warning appeared after 5 seconds; restarting
+  the server released the stuck request. Closing and reopening the window exposed
+  **Reset** after 15 seconds, and the next message worked. These results were reported
+  in the 2026-09-25 handoff. **[live]**
+- **Wrong request ID: rule (c) amended.** The original `--fault wrong-rid` test left
+  the transport busy after its only callback had arrived. A well-formed wrong-ID
+  frame is now dropped only while `$cai_tx_abandoned` is positive; otherwise it must
+  finish as failed with "calradia-server sent a garbled reply." See the
+  [callback case table](protocol-v1.md#game-state-machine). The original failure was
+  observed in game on 2026-09-25. Review of `bef22d8` also found a missing ID-match
+  guard in case (b), which was restored before retesting. The corrected build passed
+  on 2026-09-25: two successive messages each showed the garbled-reply error without
+  leaving the transport stuck (confirmed by the player and an in-game screenshot).
+  **[live]**
+- **Unbroken text.** The engine wraps at spaces, so a long word without spaces can
+  overflow horizontally even inside the bounded log. This is an accepted limitation.
+
+### Milestone 2 acceptance tests
+
+Tests 5–9 passed in game on 2026-09-25 with the corrected mod installed. Together
+with the earlier live checks above, these complete Milestone 2's in-game acceptance.
+
+Start a fresh server for each row using
+`calradia-server/target/release/calradia-server` with the arguments below. Install the
+current mod only while Warband is closed, then launch a new game and open
+**Camp → Talk with Hrodvar.** A server test or build does not establish game-side
+acceptance; record the observed result and date after each in-game run.
+
+| Test | Server arguments / action | Expected in-game result | Result / date |
+|---|---|---|---|
+| 5 | `--fake-llm --fault wrong-rid` | "calradia-server sent a garbled reply."; a second Say works immediately and fails the same way, without getting stuck. | Passed 2026-09-25; two messages confirmed in game and screenshot. |
+| 6 | `--fault oversize-3000` | Reply capped at 500 characters on a word boundary, ending in `...`; scrollbar appears if the text exceeds the area. | Passed 2026-09-25; ellipsis and working scrolling confirmed by player and screenshots. Sending a–e retained b–e, confirming the four-exchange limit. |
+| 7 | `--fault nonascii` | Curly quotes, dashes and accented letters become plain ASCII; emoji are removed, with no garbled characters. | Passed 2026-09-25; player and screenshot confirmed clean ASCII quotes, hyphen, cafe, naive, Strasse and Ole, with no emoji or garbled characters. |
+| 8 | `--fake-llm`; restart immediately after the `/v1/talk` response is logged, before the next poll | "The server lost this conversation." (code 5). | Passed 2026-09-25; automatic restart after talk, with the expected message confirmed in game and screenshot. |
+| 9 | `--fake-llm --deadline-secs 1` | "Hrodvar could not answer (timeout)." | Passed 2026-09-25; player and screenshot confirmed the expected timeout message. |
+
+Optional: `--fault malformed` or `--fault empty` should show
+"calradia-server could not be reached." The empty-body transport failure was already
+reported in the 2026-09-25 handoff; these optional fault-mode runs are not required
+for acceptance.
 
 ## Limitations to design around in later milestones
 

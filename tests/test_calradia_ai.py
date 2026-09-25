@@ -439,6 +439,28 @@ def test_send_message_to_url_only_in_cai_tx_send(mod: dict[str, bytes]) -> None:
         assert count == (3 if path.name == "module_scripts.py" else 0), path.name
 
 
+def test_reply_delivery_is_guarded_by_request_id(mod: dict[str, bytes]) -> None:
+    """Case (b) must not swallow wrong-rid frames before failure case (d)."""
+    by_name = header_operations()
+    ops = dict(scripts(mod["scripts.txt"]))[CHANGED_SCRIPT]
+    tx_rid = (TAG_VARIABLE << OP_NUM_VALUE_BITS) | names(mod["variables.txt"]).index(b"cai_tx_rid")
+    # The callback saves reg0 (the received rid) before evaluating the case table.
+    rid = next(
+        args[0]
+        for opcode, args in ops
+        if opcode == by_name["assign"] and args[1] == 1 << OP_NUM_VALUE_BITS
+    )
+    completions = [
+        i
+        for i, (opcode, args) in enumerate(ops)
+        if opcode == by_name["assign"] and args == [tx_rid, 0]
+    ]
+    assert len(completions) == 2  # Delivery (b), then failure (d).
+    delivery = completions[0]
+    branch = max(i for i in range(delivery) if ops[i][0] == by_name["else_try"])
+    assert (by_name["eq"], [rid, tx_rid]) in ops[branch + 1 : delivery]
+
+
 # --- tests: URL templates and protocol constants --------------------------------------
 
 

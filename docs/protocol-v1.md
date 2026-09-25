@@ -133,6 +133,9 @@ Amended on 2026-09-25 after in-game testing with `--fault wrong-rid`. The origin
 (c) dropped *every* wrong-rid frame, which left the transport busy with no request left
 to complete it: the engine makes exactly one callback per request, and the mod sends only
 one at a time. Reset increments `$cai_tx_abandoned`.
+Case (b) must explicitly check that the received rid matches `tx_rid`; checking only
+WF would accept a wrong-rid frame before it can reach case (d). The matching guard
+was restored on 2026-09-25 after reviewing the initial amendment in `bef22d8`.
 
 - **Sending:**
   - The only send site is `script_cai_tx_send`, and it sends only when `$cai_tx_rid`

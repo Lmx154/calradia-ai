@@ -9327,6 +9327,7 @@ scripts = [
       (else_try),
         # (b) The reply to our request: complete the transport, then deliver the frame.
         (eq, ":well_formed", 1),
+        (eq, ":rid", "$cai_tx_rid"),
         (assign, "$cai_tx_rid", 0),
         (try_begin),
           (eq, ":for_conversation", 1),
