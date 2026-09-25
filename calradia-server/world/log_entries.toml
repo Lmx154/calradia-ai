@@ -1,0 +1,797 @@
+# One entry per Native log entry type (module_constants.py logent_*).
+# Placeholders: {actor} {center} {troop} {faction} {center_lord} {center_faction} {troop_faction}.
+# A placeholder is a troop, party or faction index sent by the game; the server names it.
+# {actor}/{troop}/{center_lord} name troops (trp_player is the player); {center} a party; the
+# {*faction} ones a faction.
+# Exceptions found in Native 1.171 (see each note):
+# - types 90-94: {actor} holds a FACTION index (the declaring realm), not a troop: actor = "faction".
+# - type 3 is also logged for travellers attacked (center set): only_if_unset = ["center"].
+# - center_lord is negative (stl_unassigned = -1 etc.) for a center without a lord; treat < 0 as none.
+# - a field passed as 0 reads as trp_player / p_main_party, so 0-valued fields are never used below.
+# - Native can also log an unset war type (0 in practice) when a war reason matches none of 90-94.
+
+[[entry]]
+type = 1
+name = "logent_village_raided"
+text = "{actor} raided the village of {center}."
+involves = ["actor", "center_lord"]
+realms = ["center_faction"]
+importance = 2
+skip = false
+note = "module_scripts.py process_village_raids (raid completed; actor = leader of the looting party, a lord or trp_player; faction -1) and diplomacy_party_attacks_neutral (player starts attacking/plundering a village; actor trp_player; faction = village realm). One player raid can log 2-3 entries. center = the village."
+
+[[entry]]
+type = 2
+name = "logent_village_extorted"
+text = "{actor} forced the villagers of {center} to hand over supplies."
+involves = ["actor", "center_lord"]
+realms = ["center_faction"]
+importance = 1
+skip = false
+note = "module_game_menus.py village_take_food 'Take the supplies'; actor trp_player, center = the village, troop -1, faction -1."
+
+[[entry]]
+type = 3
+name = "logent_caravan_accosted"
+text = "{actor} waylaid travellers of {faction} on the road."
+involves = ["actor"]
+realms = ["faction"]
+only_if_unset = ["center"]
+importance = 1
+skip = false
+note = "Value 3 is shared with logent_traveller_attacked. caravan_accosted (module_dialogs.py merchant_demand_toll_accept; module_scripts.py diplomacy_party_attacks_neutral for caravans/villager parties): actor trp_player, center -1, troop -1, faction = victims' realm. traveller_attacked (module_scripts.py battle_political_consequences): actor = winning PARTY id, center = origin center, troop = destination CENTER, faction = WINNER's realm. Text is for caravan_accosted; drop type-3 entries whose center is not -1."
+
+[[entry]]
+type = 4
+name = "logent_helped_peasants"
+text = "{actor} helped the villagers of {center}."
+involves = ["actor", "center_lord"]
+realms = ["center_faction"]
+importance = 1
+skip = false
+note = "module_dialogs.py village elder cattle and grain deliveries; module_game_menus.py train_peasants_against_bandits_success. actor trp_player, center = the village, troop -1, faction -1."
+
+[[entry]]
+type = 5
+name = "logent_party_traded"
+text = "A caravan from {center} completed a trading run."
+involves = []
+realms = []
+importance = 1
+skip = true
+note = "module_scripts.py do_merchant_town_trade: actor = merchant PARTY id, center = origin center, troop = destination CENTER (party id), faction -1. Fires on every caravan trade; pure noise."
+
+[[entry]]
+type = 10
+name = "logent_castle_captured_by_player"
+text = "{actor} captured {center} from {faction}."
+involves = ["actor", "center_lord"]
+realms = ["faction"]
+importance = 3
+skip = false
+note = "module_game_menus.py battle won -> mnu_castle_taken; actor trp_player, center = the town/castle, troop -1, faction = previous owner. Logged before the transfer, so center_lord is the lord who lost it and center_faction equals faction."
+
+[[entry]]
+type = 11
+name = "logent_lord_defeated_by_player"
+text = "{actor} defeated {troop} in battle."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_game_menus.py total victory, 2 calls (player alone, or player gave >= 40% of allied strength); actor trp_player, troop = enemy leader (a lord), faction = his realm; not logged for battles at a center."
+
+[[entry]]
+type = 12
+name = "logent_lord_captured_by_player"
+text = "{actor} defeated {troop} in battle and took the lord prisoner."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_dialogs.py defeat_lord_answer 'You are my prisoner now'; actor trp_player, center -1, troop = defeated lord, faction = his realm."
+
+[[entry]]
+type = 13
+name = "logent_lord_defeated_but_let_go_by_player"
+text = "{actor} defeated {troop} in battle and let the lord go free."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_dialogs.py defeat_lord_answer 'You are free to go'; actor trp_player, center -1, troop = defeated lord, faction = his realm."
+
+[[entry]]
+type = 14
+name = "logent_player_defeated_by_lord"
+text = "{actor} was defeated in battle by {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_game_menus.py player defeat; one entry per lord in the victorious enemy party; actor trp_player, center -1, troop = that lord, faction = his realm."
+
+[[entry]]
+type = 15
+name = "logent_player_retreated_from_lord"
+text = "{actor} retreated rather than face {troop} in battle."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = false
+note = "module_game_menus.py encounter_leave (one entry per enemy lord, faction = his realm) and join_leave (leader of the enemy in a battle the player declined to join, faction -1). actor trp_player, center -1."
+
+[[entry]]
+type = 16
+name = "logent_player_retreated_from_lord_cowardly"
+text = "{actor} fled from {troop}, leaving part of the army behind to hold off the enemy."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_game_menus.py encounter_retreat (player sacrifices troops to escape); one entry per enemy lord; actor trp_player, center -1, troop = lord, faction = his realm."
+
+[[entry]]
+type = 17
+name = "logent_lord_helped_by_player"
+text = "{actor} came to the aid of {troop} in battle."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_dialogs.py tc_ally_thanks, 3 sites; actor trp_player, center -1, faction -1. Two sites pass the helped lord as troop (what the comment code expects); the highest-relation site ('Again you save our necks') passes the ENEMY party leader instead (Native bug)."
+
+[[entry]]
+type = 18
+name = "logent_player_participated_in_siege"
+text = "{actor} took part in the siege in which {center} was taken from {faction}."
+involves = ["actor"]
+realms = ["faction"]
+importance = 3
+skip = false
+note = "module_scripts.py game_event_simulate_battle (auto-resolved siege the player is engaged in) and module_game_menus.py castle_taken_by_friends. actor trp_player, center = fallen town/castle, troop 0 (unused), faction = previous owner. center_lord/center_faction are before-transfer at one site and after at the other, so unused."
+
+[[entry]]
+type = 19
+name = "logent_player_participated_in_major_battle"
+text = "{actor} helped win a great battle against {faction} near {center}."
+involves = ["actor"]
+realms = ["faction"]
+importance = 2
+skip = false
+note = "module_game_menus.py total victory where the player gave < 40% of allied strength and the enemy had > 1000 strength; actor trp_player, center = nearest center to the battle, troop -1, faction = enemy leader's realm."
+
+[[entry]]
+type = 20
+name = "logent_castle_given_to_lord_by_player"
+text = "{actor} granted {center} to {troop} as a fief."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_dialogs.py minister_grant_fief_complete (player as ruler, via minister); actor trp_player, center = fief, troop = vassal of the player's realm, faction = $g_encountered_party_faction (unreliable, unused). give_center_to_lord may also log type 22 for the same grant."
+
+[[entry]]
+type = 21
+name = "logent_pledged_allegiance"
+text = "{actor} swore allegiance to {troop} of {faction}."
+involves = ["actor", "troop"]
+realms = ["faction"]
+importance = 2
+skip = false
+note = "module_dialogs.py lord_give_conclude_2; actor trp_player, center -1, troop = new liege (may be a pretender or the player's husband), faction = liege's realm (player supporters faction for a pretender)."
+
+[[entry]]
+type = 22
+name = "logent_liege_grants_fief_to_vassal"
+text = "{actor} granted the fief of {center} to {troop}."
+involves = ["actor", "troop"]
+realms = ["faction"]
+importance = 2
+skip = false
+note = "module_scripts.py give_center_to_lord, only when the previous holder is the faction leader; actor = faction leader (may be trp_player), center = fief, troop = new holder (may be trp_player), faction = new holder's realm. Logged before slot_town_lord changes, so center_lord = actor."
+
+[[entry]]
+type = 23
+name = "logent_renounced_allegiance"
+text = "{actor} renounced allegiance to {troop} of {troop_faction}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 3
+skip = false
+note = "module_dialogs.py lord_give_conclude_2 (pledging to another liege) and lord_ask_leave_service_3; module_scripts.py activate_player_faction. actor trp_player, center -1, troop = former liege. faction is the old realm in dialogs but the player supporters faction in activate_player_faction, so troop_faction is used."
+
+[[entry]]
+type = 24
+name = "logent_player_claims_throne_1"
+text = "Word spread that some in the realm speak of {actor} as the next monarch."
+involves = ["actor"]
+realms = []
+importance = 3
+skip = false
+note = "module_dialogs.py companion returning from a kingsupport mission when right to rule reaches 10-14; actor trp_player, center/troop/faction 0 (unused)."
+
+[[entry]]
+type = 25
+name = "logent_player_claims_throne_2"
+text = "Companions of {actor} were heard telling peasants that {actor} has a claim to the throne."
+involves = ["actor"]
+realms = []
+importance = 3
+skip = false
+note = "module_dialogs.py companion returning from a kingsupport mission when right to rule reaches 20-24; actor trp_player, center/troop/faction 0 (unused)."
+
+[[entry]]
+type = 26
+name = "logent_troop_feels_cheated_by_troop_over_land"
+text = "{actor} felt cheated when {center} was granted to {troop}."
+involves = ["actor", "troop"]
+realms = ["faction"]
+importance = 1
+skip = false
+note = "module_scripts.py give_center_to_lord; actor = lord of the realm who resents the grant (large relation loss with the liege, or was promised a fief), center = fief, troop = recipient, faction = recipient's realm."
+
+[[entry]]
+type = 27
+name = "logent_ruler_intervenes_in_quarrel"
+text = "{actor} ruled in favor of {troop} in a quarrel between lords."
+involves = ["actor", "troop"]
+realms = ["faction"]
+importance = 1
+skip = false
+note = "module_scripts.py cf_random_political_event (actor = faction leader) and module_dialogs.py lord_quarrel_intervention (actor trp_player as ruler, faction = player supporters faction). troop = favored lord; center holds the LOSING lord's TROOP id, so center fields are unused."
+
+[[entry]]
+type = 28
+name = "logent_lords_quarrel_over_land"
+text = "{actor} quarreled with {troop} over land."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 29
+name = "logent_lords_quarrel_over_insult"
+text = "{actor} quarreled with {troop} over an insult."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 30
+name = "logent_marshal_vs_lord_quarrel"
+text = "{actor} quarreled with {troop} over the command of the army."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 31
+name = "logent_lords_quarrel_over_woman"
+text = "{actor} quarreled with a rival suitor over {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = false
+note = "module_scripts.py courtship_event_troop_court_lady, 4 sites; actor = suitor, troop = the lady, faction 0. center holds the rival's TROOP id (trp_player or the previous suitor), so center fields are unused."
+
+[[entry]]
+type = 32
+name = "logent_lord_protests_marshall_appointment"
+text = "{actor} protested the appointment of a new marshal by {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = false
+note = "module_scripts.py appoint_faction_marshall; actor = protesting lord, center holds the new marshal's TROOP id, troop = faction leader, faction = $g_encountered_party_faction (unrelated global, Native bug); troop_faction is the realm."
+
+[[entry]]
+type = 33
+name = "logent_lord_blames_defeat"
+text = "{actor} blamed {troop} for favoring the marshal who lost a battle to {faction}."
+involves = ["actor", "troop"]
+realms = ["troop_faction", "faction"]
+importance = 1
+skip = false
+note = "module_scripts.py battle_political_consequences; actor = defeated lord, center holds the defeated marshal's TROOP id (may be trp_player), troop = actor's faction leader, faction = the winning realm."
+
+[[entry]]
+type = 35
+name = "logent_player_suggestion_succeeded"
+text = "{troop} won a battle while following the advice of {actor}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = false
+note = "module_scripts.py battle_political_consequences; actor trp_player, center -1, troop = winning lord whose party was under the player's suggestion, faction -1."
+
+[[entry]]
+type = 36
+name = "logent_player_suggestion_failed"
+text = "{troop} lost a battle while following the advice of {actor}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = false
+note = "module_scripts.py battle_political_consequences; actor trp_player, center -1, troop = defeated lord whose party was under the player's suggestion, faction -1."
+
+[[entry]]
+type = 37
+name = "logent_liege_promises_fief_to_vassal"
+text = "{actor} promised a fief to {troop} in return for allegiance."
+involves = ["actor", "troop"]
+realms = ["faction"]
+importance = 1
+skip = false
+note = "module_dialogs.py lord_recruit_pledge (lord recruited with the benefit argument); actor trp_player as liege, center 0 (unused), troop = recruited lord, faction = the player's realm."
+
+[[entry]]
+type = 38
+name = "logent_lord_insults_lord_for_cowardice"
+text = "{actor} accused {troop} of cowardice."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 39
+name = "logent_lord_insults_lord_for_rashness"
+text = "{actor} accused {troop} of rashness."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 40
+name = "logent_lord_insults_lord_for_abandonment"
+text = "{actor} accused {troop} of abandoning allies in battle."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 41
+name = "logent_lord_insults_lord_for_indecision"
+text = "{actor} accused {troop} of indecision."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 42
+name = "logent_lord_insults_lord_for_cruelty"
+text = "{actor} accused {troop} of cruelty."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 43
+name = "logent_lord_insults_lord_for_dishonor"
+text = "{actor} accused {troop} of dishonorable conduct."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 45
+name = "logent_game_start"
+text = "{actor} arrived in Calradia."
+involves = ["actor"]
+realms = []
+importance = 1
+skip = true
+note = "module_scripts.py initialize_npcs; actor trp_player, other fields -1. Used only for first-meeting comments; noise."
+
+[[entry]]
+type = 46
+name = "logent_poem_composed"
+text = "{actor} composed a poem."
+involves = ["actor"]
+realms = []
+importance = 1
+skip = true
+note = "Marked ##Not added in module_constants.py; never logged."
+
+[[entry]]
+type = 47
+name = "logent_tournament_distinguished"
+text = "{actor} fought with distinction in a tournament."
+involves = ["actor"]
+realms = []
+importance = 1
+skip = true
+note = "Marked ##Not added in module_constants.py; never logged."
+
+[[entry]]
+type = 48
+name = "logent_tournament_won"
+text = "{actor} won a tournament."
+involves = ["actor"]
+realms = []
+importance = 1
+skip = true
+note = "Marked ##Not added in module_constants.py; never logged."
+
+[[entry]]
+type = 51
+name = "logent_lady_favors_suitor"
+text = "{actor} was seen to favor the suit of {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = false
+note = "module_scripts.py courtship_event_troop_court_lady (NPC suitors only); lady = actor, suitor = troop (as the constants comment says), center 0 and faction 0 (unused)."
+
+[[entry]]
+type = 52
+name = "logent_lady_betrothed_to_suitor_by_choice"
+text = "{actor} accepted the suit of {troop}, and the two are now betrothed."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_scripts.py courtship_event_troop_court_lady; lady = actor, suitor = troop, center 0, faction 0."
+
+[[entry]]
+type = 53
+name = "logent_lady_betrothed_to_suitor_by_family"
+text = "{actor} was forced by her family into a betrothal with {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_scripts.py courtship_event_troop_court_lady (guardian forces it although she dislikes him); lady = actor, suitor = troop, center 0, faction 0."
+
+[[entry]]
+type = 54
+name = "logent_lady_rejects_suitor"
+text = "{actor} refused the suit of {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = false
+note = "module_scripts.py courtship_event_troop_court_lady; lady = actor, suitor = troop, center 0, faction 0."
+
+[[entry]]
+type = 55
+name = "logent_lady_father_rejects_suitor"
+text = "The family of {actor} made her give up {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171; only read by the lady gossip dialog in module_dialogs.py (lady = actor, suitor = troop)."
+
+[[entry]]
+type = 56
+name = "logent_lady_marries_lord"
+text = "{actor} married {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = true
+note = "Never logged in Native 1.171; only read by comment/gossip code. Weddings are logged as type 61."
+
+[[entry]]
+type = 57
+name = "logent_lady_elopes_with_lord"
+text = "{actor} eloped with {troop}, defying her family."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_scripts.py courtship_event_bride_marry_groom (elopement = 1), reached from courtship_event_troop_court_lady (NPC groom) and module_dialogs.py (player groom). actor = lady, troop = groom (lord or trp_player), center = lady's current center, faction 0."
+
+[[entry]]
+type = 58
+name = "logent_lady_rejected_by_suitor"
+text = "{troop} tired of courting {actor} and gave up the suit."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = false
+note = "module_scripts.py courtship_event_troop_court_lady stalemate branch; lady = actor, suitor = troop (the suitor gives up, per the gossip string), center 0, faction 0."
+
+[[entry]]
+type = 59
+name = "logent_lady_betrothed_to_suitor_by_pressure"
+text = "{actor} agreed to a betrothal with {troop} under pressure from her family."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_scripts.py courtship_event_troop_court_lady; lady = actor, suitor = troop, center 0, faction 0."
+
+[[entry]]
+type = 60
+name = "logent_lady_and_suitor_break_engagement"
+text = "{actor} and {troop} broke off their engagement."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site or reader)."
+
+[[entry]]
+type = 61
+name = "logent_lady_marries_suitor"
+text = "{actor} married {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 2
+skip = false
+note = "module_scripts.py courtship_event_bride_marry_groom (elopement = 0): NPC feast wedding, player groom, or female player bride (actor trp_player). actor = bride, troop = groom, faction 0. center = venue, but for a female player it is $g_encountered_party (may be the groom's party), so unused."
+
+[[entry]]
+type = 62
+name = "logent_lord_holds_lady_hostages"
+text = "{actor} held {troop} as a hostage."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 63
+name = "logent_challenger_defeats_lord_in_duel"
+text = "{actor} defeated {troop} in a duel."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 64
+name = "logent_challenger_loses_to_lord_in_duel"
+text = "{actor} lost a duel to {troop}."
+involves = ["actor", "troop"]
+realms = ["troop_faction"]
+importance = 1
+skip = true
+note = "Never logged in Native 1.171 (no call site); placeholders are a guess."
+
+[[entry]]
+type = 66
+name = "logent_player_stole_cattles_from_village"
+text = "{actor} stole cattle from the village of {center}."
+involves = ["actor", "troop"]
+realms = ["center_faction"]
+importance = 1
+skip = false
+note = "module_game_menus.py village steal cattle, only when the village has a lord; actor trp_player, center = village, troop = village lord, faction = $g_encountered_party_faction (the village realm; center_faction used)."
+
+[[entry]]
+type = 70
+name = "logent_party_spots_wanted_bandits"
+text = "Wanted bandits were sighted near {center}."
+involves = []
+realms = []
+importance = 1
+skip = true
+note = "module_triggers.py hourly while qst_track_down_bandits is active, one entry per kingdom party in range; actor = spotting PARTY id, center = nearest center, troop = bandit PARTY id, faction -1. Noise."
+
+[[entry]]
+type = 72
+name = "logent_border_incident_cattle_stolen"
+text = "Villagers from {faction} lands were accused of stealing cattle from {center}."
+involves = []
+realms = ["faction", "center_faction"]
+importance = 1
+skip = false
+note = "module_game_menus.py notification_border_incident (daily random roll in module_simple_triggers.py); actor = offending VILLAGE (party id), center = victim village, troop -1, faction = offender's realm; center_faction = victim's realm."
+
+[[entry]]
+type = 73
+name = "logent_border_incident_bride_abducted"
+text = "Villagers from {faction} lands were accused of abducting a bride from {center}."
+involves = []
+realms = ["faction", "center_faction"]
+importance = 1
+skip = false
+note = "module_game_menus.py notification_border_incident; actor = offending VILLAGE (party id), center = victim village, troop -1, faction = offender's realm."
+
+[[entry]]
+type = 74
+name = "logent_border_incident_villagers_killed"
+text = "Villagers from {faction} lands were accused of killing farmers from {center} in a dispute over water."
+involves = []
+realms = ["faction", "center_faction"]
+importance = 1
+skip = false
+note = "module_game_menus.py notification_border_incident; actor = offending VILLAGE (party id), center = victim village, troop -1, faction = offender's realm."
+
+[[entry]]
+type = 75
+name = "logent_border_incident_subjects_mistreated"
+text = "Notables of a village held by {faction} complained of mistreatment and sought another realm's protection."
+involves = []
+realms = ["faction"]
+importance = 1
+skip = false
+note = "module_game_menus.py notification_border_incident; actor = the VILLAGE (party id), center -1, troop -1, faction = its current realm. The petitioned realm (original/ex owner) is not logged."
+
+[[entry]]
+type = 76
+name = "logent_border_incident_troop_attacks_neutral"
+text = "{actor} attacked subjects of a neutral realm, causing a border incident."
+involves = ["actor"]
+realms = ["faction"]
+importance = 2
+skip = false
+note = "module_scripts.py diplomacy_party_attacks_neutral; all callers pass p_main_party, so actor = trp_player; center -1; faction = player's realm (0 if unaffiliated). troop is never assigned on this path (Native bug), so unused. A type 1 or 3 entry names the victims."
+
+[[entry]]
+type = 77
+name = "logent_border_incident_troop_breaks_truce"
+text = "{actor} broke a truce by attacking subjects of {troop_faction}."
+involves = ["actor", "troop"]
+realms = ["faction", "troop_faction"]
+importance = 2
+skip = false
+note = "module_scripts.py diplomacy_party_attacks_neutral truce path; actor trp_player, center -1, troop = attacked lord, or the defending ruler if the party has no lord; faction = player's realm; troop_faction = defending realm."
+
+[[entry]]
+type = 78
+name = "logent_border_incident_troop_suborns_lord"
+text = "{actor} persuaded {troop} to abandon {faction} and change allegiance."
+involves = ["actor", "troop"]
+realms = ["faction", "troop_faction"]
+importance = 2
+skip = false
+note = "module_dialogs.py lord_recruit_6_reaction and lord_husband_auto_recruit, only if the lord's old realm is not at war with the player's; actor trp_player, center -1, troop = recruited lord, faction = his OLD realm; troop_faction = the player's realm (logged after the switch)."
+
+[[entry]]
+type = 80
+name = "logent_policy_ruler_attacks_without_provocation"
+text = "The ruler of {faction} attacked another realm without provocation."
+involves = []
+realms = ["faction"]
+importance = 1
+skip = true
+note = "Never logged: only a policy id for script_faction_follows_controversial_policy (relation effects), which does not call add_log_entry."
+
+[[entry]]
+type = 81
+name = "logent_policy_ruler_ignores_provocation"
+text = "The ruler of {faction} ignored a provocation by another realm."
+involves = []
+realms = ["faction"]
+importance = 1
+skip = true
+note = "Never logged: only a policy id for script_faction_follows_controversial_policy (module_game_menus.py)."
+
+[[entry]]
+type = 82
+name = "logent_policy_ruler_makes_peace_too_soon"
+text = "The ruler of {faction} made peace too soon."
+involves = []
+realms = ["faction"]
+importance = 1
+skip = true
+note = "Never logged: only handled inside script_faction_follows_controversial_policy, which nothing calls with it."
+
+[[entry]]
+type = 83
+name = "logent_policy_ruler_declares_war_with_justification"
+text = "The ruler of {faction} declared a war with just cause."
+involves = []
+realms = ["faction"]
+importance = 1
+skip = true
+note = "Never logged: only a policy id for script_faction_follows_controversial_policy (from diplomacy_start_war_between_kingdoms)."
+
+[[entry]]
+type = 84
+name = "logent_policy_ruler_breaks_truce"
+text = "The ruler of {faction} broke a truce."
+involves = []
+realms = ["faction"]
+importance = 1
+skip = true
+note = "Never logged: only a policy id for script_faction_follows_controversial_policy (from diplomacy_start_war_between_kingdoms)."
+
+[[entry]]
+type = 85
+name = "logent_policy_ruler_issues_indictment_just"
+text = "The ruler of {faction} indicted a vassal for treason on just grounds."
+involves = []
+realms = ["faction"]
+importance = 1
+skip = true
+note = "Never used in Native 1.171 (no reference outside module_constants.py)."
+
+[[entry]]
+type = 86
+name = "logent_policy_ruler_issues_indictment_questionable"
+text = "The ruler of {faction} indicted a vassal for treason on questionable grounds."
+involves = []
+realms = ["faction"]
+importance = 1
+skip = true
+note = "Never used in Native 1.171 (no reference outside module_constants.py)."
+
+[[entry]]
+type = 90
+name = "logent_player_faction_declares_war"
+text = "{actor} declared war on {faction}."
+involves = []
+realms = ["actor", "faction"]
+actor = "faction"
+importance = 3
+skip = false
+note = "module_scripts.py diplomacy_start_war_between_kingdoms: add_log_entry(war_event, kingdom_a, 0, 0, kingdom_b). actor = declaring FACTION id, faction = target realm, center/troop 0 (unused). Used when the player's faction declares, and when an AI realm declares to control Calradia (extend power)."
+
+[[entry]]
+type = 91
+name = "logent_faction_declares_war_out_of_personal_enmity"
+text = "{actor} declared war on {faction} out of enmity and distrust."
+involves = []
+realms = ["actor", "faction"]
+actor = "faction"
+importance = 3
+skip = false
+note = "diplomacy_start_war_between_kingdoms, reason 'considers s16 dangerous and untrustworthy'; actor = declaring FACTION id, faction = target realm."
+
+[[entry]]
+type = 92
+name = "logent_faction_declares_war_to_regain_territory"
+text = "{actor} declared war on {faction} to regain lost territory."
+involves = []
+realms = ["actor", "faction"]
+actor = "faction"
+importance = 3
+skip = false
+note = "diplomacy_start_war_between_kingdoms, reason 'anxious to reclaim old lands now held by s16'; actor = declaring FACTION id, faction = target realm."
+
+[[entry]]
+type = 93
+name = "logent_faction_declares_war_to_curb_power"
+text = "{actor} declared war on {faction} to curb its growing power."
+involves = []
+realms = ["actor", "faction"]
+actor = "faction"
+importance = 3
+skip = false
+note = "diplomacy_start_war_between_kingdoms, reason 'alarmed by the growing power of s16'; actor = declaring FACTION id, faction = target realm."
+
+[[entry]]
+type = 94
+name = "logent_faction_declares_war_to_respond_to_provocation"
+text = "{actor} declared war on {faction} in response to provocations by its subjects."
+involves = []
+realms = ["actor", "faction"]
+actor = "faction"
+importance = 3
+skip = false
+note = "diplomacy_start_war_between_kingdoms, reason 'too much internal discontent to ignore provocations by s16's subjects'; actor = declaring FACTION id, faction = target realm."
+
+[[entry]]
+type = 95
+name = "logent_war_declaration_types_end"
+text = "{actor} declared war on {faction}."
+involves = []
+realms = ["faction"]
+importance = 1
+skip = true
+note = "Sentinel marking the end of the war declaration range; never logged."

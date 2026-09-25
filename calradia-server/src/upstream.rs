@@ -5,8 +5,7 @@
 //! deadline bounds every connect, write and read, and a cancel can abort a request by
 //! shutting the socket down from another thread.
 
-use crate::jobs::WorkItem;
-use crate::prompt;
+use crate::prompt::Chat;
 use crate::protocol::{
     REASON_CANCELED, REASON_TIMEOUT, REASON_UPSTREAM_ERROR, REASON_UPSTREAM_UNAVAILABLE,
     UPSTREAM_MAX_BODY,
@@ -20,7 +19,6 @@ use std::time::{Duration, Instant};
 
 pub const DEFAULT_UPSTREAM: &str = "http://172.17.0.1:8080/v1";
 pub const DEFAULT_MODEL: &str = "calradia-qwen3.5-9b";
-const MAX_TOKENS: u32 = 220;
 const TEMPERATURE: f64 = 0.8;
 /// Cap on the upstream response's status line plus headers.
 const MAX_RESPONSE_HEAD: usize = 64 * 1024;
@@ -36,7 +34,7 @@ pub struct Failure {
 }
 
 impl Failure {
-    fn new(reason: &'static str, detail: impl Into<String>) -> Self {
+    pub fn new(reason: &'static str, detail: impl Into<String>) -> Self {
         Failure {
             reason,
             detail: detail.into(),
@@ -139,14 +137,16 @@ pub enum Backend {
 }
 
 impl Backend {
-    /// Produces the raw, unsanitized reply for `item`.
+    /// Produces the raw, unsanitized reply to `chat` for job `job`.
     ///
     /// For the upstream, `attach` is called with the connected socket before anything is
     /// sent; it registers a handle for cancel-by-shutdown and returns false if the job has
     /// already left PENDING, in which case the request is abandoned.
     pub fn generate(
         &self,
-        item: &WorkItem,
+        chat: &Chat,
+        job: u32,
+        deadline: Instant,
         attach: &mut dyn FnMut(&TcpStream) -> bool,
     ) -> Result<String, Failure> {
         match self {
@@ -155,38 +155,43 @@ impl Backend {
                 model,
                 connect_timeout,
             } => {
-                let system = item
-                    .prompt
-                    .clone()
-                    .unwrap_or_else(|| prompt::system_prompt(item.npc, &item.pname, item.day));
-                let body = json!({
+                let messages: Vec<Value> = chat
+                    .messages
+                    .iter()
+                    .map(|(role, content)| json!({"role": role, "content": content}))
+                    .collect();
+                let mut body = json!({
                     "model": model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": item.msg},
-                    ],
-                    "max_tokens": MAX_TOKENS,
+                    "messages": messages,
+                    "max_tokens": chat.max_tokens,
                     "temperature": TEMPERATURE,
                     "chat_template_kwargs": {"enable_thinking": false},
                 });
-                let conn = connect(endpoint, item.deadline, *connect_timeout)?;
+                if chat.json {
+                    // llama.cpp constrains the answer to a JSON object.
+                    body["response_format"] = json!({"type": "json_object"});
+                }
+                let conn = connect(endpoint, deadline, *connect_timeout)?;
                 if !attach(&conn) {
                     return Err(Failure::new(
                         REASON_CANCELED,
                         "job left PENDING before send",
                     ));
                 }
-                let (status, body) = post(&conn, endpoint, &body.to_string(), item.deadline)?;
+                let (status, body) = post(&conn, endpoint, &body.to_string(), deadline)?;
                 parse_completion(status, &body)
             }
             Backend::Canned { delay, kind } => {
-                let left = item.deadline.saturating_duration_since(Instant::now());
+                let left = deadline.saturating_duration_since(Instant::now());
                 if left < *delay {
                     thread::sleep(left);
                     return Err(Failure::timeout("canned reply"));
                 }
                 thread::sleep(*delay);
-                Ok(kind.text(item.id))
+                Ok(match kind {
+                    Canned::Reply if !chat.fake_reply.is_empty() => chat.fake_reply.clone(),
+                    _ => kind.text(job),
+                })
             }
         }
     }

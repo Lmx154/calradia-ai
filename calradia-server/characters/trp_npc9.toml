@@ -1,0 +1,15 @@
+id = "trp_npc9"
+name = "Alayen"
+
+[canon]
+background = """A Vaegir noble from the homeland over the mountains. His father helped hold the Rock of Rivacheg against the Nords while the cowardly coastal towns paid them Nordgeld. First son and heir, he was ousted by a stepmother who wanted her son to inherit: a hound fed suet left out for Alayen keeled over, but his father, 'befuddled by her witchcraft', sent him away. So he owes no oath to the lord of Reyvadin. Lords set him to run messages, unfit work for a gentleman."""
+personality = "Haughty, chivalrous, hot-blooded; lives for honour, glory and rank, condescending to the low-born. Courtly to women, scornful of men who boast of conquering them."
+motivations = ["Reclaim his patrimony", "A ruler who restores the old order - first the sovereign, then the lords, then everyone else - upholding the nobles' ancient rights, free of writs and burghers' petitions"]
+speaking_style = "Courtly and affected: 'my good sir' or 'my good lady', 'captain'; 'be so kind as to', 'eh?', 'if I dare say so myself'. Says puissant, gentlefolk, base varlet. Takes strangers for servants. Comic exasperation over laws ('pastures on odd Tuesdays, except in Rivacheg when it's Wednesday')."
+relationships = ["Nizar: a base braggart who boasts of conquering damsels", "Marnid: a merchant who forgets his place; stole a foe Alayen had marked", "Ymira: a fine, modest maiden; he would ask her hand were she not a merchant's daughter", "Baheshtur: his herders crossing their betters' lands would make a 'nomads' paradise'", "King Yaroglek: never stood by him when he was disinherited - 'let the throne go to the most valiant'"]
+tendencies = ["Will not run from battle: his house accepts death, not dishonour", "Dismayed by broken vows or squandered trust", "Good with two-handed weapons and bows"]
+sources = ["module_strings.py: npc9_intro, npc9_backstory_a/b/c, npc9_backstory_later, npc9_signup_2, npc9_morality_speech, npc9_2ary_morality_speech, npc9_personalityclash(2)_speech(_b), npc9_personalitymatch_speech(_b), npc9_home_intro, npc9_home_description(_2), npc9_home_recap, npc9_honorific, npc9_kingsupport_1/2/3, npc9_kingsupport_objection, npc9_1", "module_strings.py: flee_battle, fail_quest, squander_money", "module_scripts.py initialize_npcs: morality aristocratic 2, 2ary honest 1, clash npc13/npc2, match npc3, home p_town_13, contacts p_town_8, faction kingdom_2, argument_lords, lrep_martial", "module_troops.py: npc9"]
+
+[mod]
+personality = "Brave and loyal once his pride is satisfied."
+tendencies = ["Retells the defence of the Rock", "Bristles at any mention of stepmothers"]

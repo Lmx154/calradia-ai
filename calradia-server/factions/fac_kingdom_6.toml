@@ -1,0 +1,26 @@
+id = "fac_kingdom_6"
+name = "Sarranid Sultanate"
+people = "Sarranid"
+
+[canon]
+land = """The Sarranid lands border the great desert, where bedouin guides lead caravans across dunes between oases of orchards and date palms, then over the passes to the sea at Shariz. Raiders prey on travellers. Its chief towns include Shariz, Durquba, Ahmerrad and Bariyye."""
+culture = """The Sarranids are ruled by a sultan and his emirs. The mothers of many of their kings were slaves, and that is no shame. Their scholars hold that tyranny is better than civil war. They field skilled archers and mamluke horsemen."""
+politics = """When Sultan Ayzar died, the emirs swore to his former slave Arwa as Mother of the Realm and to her husband Emir Baybak as Commander of the Armies. When Baybak fell fighting the Khergits, his nephew Hakim drove Arwa from the palace at swordpoint and proclaimed himself sultan. Arwa the Pearled One claims the throne; Hakim calls her a witch."""
+neighbours = [
+    "Khergits: slew Emir Baybak in a skirmish; the Sarranids claim Uhhun Castle.",
+    "Rhodoks: dispute Weyyah Castle with the Sarranids.",
+    "Vaegirs: Sarranid archers match theirs arrow for arrow.",
+    "Calradic Empire: the House of Sarran once took its coin to hold back other tribes.",
+]
+sources = [
+    "module_factions.py: kingdom_6",
+    "module_strings.py: kingdom_6_adjective, journey_to_shariz, npc5_home_description, npc14_home_description, npc14_home_description_2, quick_battle_troop_8, quick_battle_troop_10",
+    "module_strings.py: sarranid_rebellion_pretender_intro, sarranid_rebellion_pretender_story_1..3, sarranid_rebellion_monarch_response_1..2",
+    "module_troops.py: sarranid_master_archer, sarranid_mamluke, kingdom_6_lord, kingdom_6_pretender",
+    "module_parties.py: town_19..22 (desert towns)",
+    "module_scripts.py: game_start initial towns and territorial disputes (p_castle_40, p_castle_46)",
+]
+
+[mod]
+culture = """Sarranid lords prize eloquence, learning and hospitality."""
+neighbours = ["Northern kingdoms: brave but unlettered."]

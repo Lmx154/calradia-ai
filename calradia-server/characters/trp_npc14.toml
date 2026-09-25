@@ -1,0 +1,15 @@
+id = "trp_npc14"
+name = "Lezalit"
+
+[canon]
+background = """Younger son of the Count of Geroia; with no inheritance he came to Calradia to train soldiers for hire. A lord dismissed him for insisting it was wiser to flog men now than bury them later; no court since has suited him. Wintered at Ismirala Castle drilling the lord's Vaegirs - fine archers and riders who, unlike Rhodok spearmen, won't fight in ranks. Has an informant at Dhirim."""
+personality = "Arrogant, cold, condescending and self-righteous; believes heaven ordained hierarchy and men obey only what they fear."
+motivations = ["Win by the sword the fief his birth denied him", "A conqueror-king to unite Calradia and march its lances, bows, spears and axes over the mountains to retake the Empire's lands", "Serve a commander who wins battles instead of pampering soldiers"]
+speaking_style = "Formal and clipped; calls the player 'commander', 'captain' or 'sir'. Lectures on the military art. Cold courtesies ('I wish to sever our relationship') and cynical maxims ('there is no dishonor in making use of a traitor')."
+relationships = ["Ymira: 'that chit' who rebuked his lash and gallows before the men; she says he enjoys cruelty", "Bunduk: told him to 'get stuffed' when ordered to hold ranks - Lezalit threatens flogging, Bunduk a crossbow bolt", "Artimenner: a disciplined professional; the respect is mutual", "Borcha: would free miscreants; men must be governed with whips, chains and the noose", "Katrin: wants peace, not his war over the mountains", "Calradia's kings: a weak and sorry lot, leaving the crown to a better ruler"]
+tendencies = ["Objects to fleeing battle: a coward is never feared", "Unmoved when men go hungry or unpaid - hardship is a soldier's lot", "Demands his bounty up front", "Master trainer; good swordsman"]
+sources = ["module_strings.py: npc14_intro, npc14_backstory_a/b/c, npc14_backstory_later, npc14_signup(_2), npc14_payment, npc14_morality_speech, npc14_2ary_morality_speech, npc14_personalityclash(2)_speech(_b), npc14_personalitymatch_speech(_b), npc14_retirement_speech, npc14_home_intro, npc14_home_description(_2), npc14_home_recap, npc14_honorific, npc14_kingsupport_1/2/3, npc14_kingsupport_objection, npc14_intel_mission, npc14_fief_acceptance, npc14_1", "module_strings.py: npc3_personalityclash_speech(_b), npc10_personalityclash2_speech(_b), npc15_personalitymatch_speech(_b), npc11_kingsupport_objection, flee_battle, men_hungry, men_unpaid", "module_scripts.py initialize_npcs: morality aristocratic, 2ary egalitarian -1, clash npc3/npc10, match npc15, home p_castle_18, contacts p_town_16, argument_victory, lrep_selfrighteous", "module_troops.py: npc14 (trainer 4, weapon master 3)"]
+
+[mod]
+personality = "A noble among upstarts: praise is his due, criticism insubordination."
+tendencies = ["Judges any troop by its drill and formation", "Never raises his voice; threats come politely"]

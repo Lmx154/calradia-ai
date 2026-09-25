@@ -27,13 +27,39 @@ CAI_CODE_BAD_REQUEST = 4
 CAI_CODE_UNKNOWN_JOB = 5
 CAI_CODE_BUSY = 6
 CAI_GAME_GIVE_UP_SECS = 120
+CAI_PROTOCOL_V2 = 2
+CAI_ST_IN_PARTY = 1
+CAI_ST_PLAYER_PRISONER = 2
+CAI_ST_OTHER_PRISONER = 4
+CAI_ST_FACTION_LEADER = 8
+CAI_ST_MARSHAL = 16
+CAI_ST_SPOUSE = 32
+CAI_ST_BETROTHED = 64
+CAI_ST_PLAYER_VASSAL = 128
+CAI_ST_PLAYER_RULER = 256
+CAI_FRAME_V2 = 2
+CAI_FRAME_V1_INTS = 3
+CAI_FRAME_V2_INTS = 7
+CAI_ACT_RELATION = 1
+CAI_ACT_GIVE = 2
+CAI_ACT_ASK = 3
+CAI_ACT_MAX_RELATION = 3
+CAI_ACT_MIN_GOLD = 10
+CAI_ACT_MAX_GIVE = 1000
+CAI_ACT_MAX_ASK = 5000
+CAI_OUT_ACCEPTED = 1
+CAI_OUT_DECLINED = 2
+CAI_OUT_FAILED = 3
+CAI_INIT_LETTER = 10
+CAI_INIT_ATTITUDE = 11
+CAI_INIT_RIVALRY = 12
+CAI_INIT_MAX_RELATION = 2
 
 # Game side only (module_presentations.py imports these too).
 CAI_NPC_HRODVAR = 1        # npc= sent with /v1/talk
 CAI_OP_TALK = 1            # ops of script_cai_tx_send
 CAI_OP_RESULT = 2
 CAI_OP_CANCEL = 3
-CAI_OP_ACK = 4
 CAI_CONV_IDLE = 0          # $cai_conv_state
 CAI_CONV_SUBMITTING = 1    # talk sent, no answer yet
 CAI_CONV_PENDING = 2       # server accepted the job; polling /v1/result
@@ -45,6 +71,13 @@ CAI_POLL_MS = 750
 CAI_GIVE_UP_MS = CAI_GAME_GIVE_UP_SECS * 1000 # longer than the server's 90 s job deadline
 CAI_STUCK_MS = 5000        # own request unanswered: tell the player to restart the server
 CAI_RESET_MS = 15000       # request older than this presentation: offer Reset
+# Milestones 4-6: world nodes sent in the background (script_cai_background_send).
+CAI_OP_EVENT = 4           # a Native log entry: /v2/event
+CAI_OP_WORLD = 5           # the daily world snapshot: /v2/world
+CAI_OP_TICK = 6            # the daily tick (autonomy): /v2/tick
+CAI_BG_RETRY_HOURS = 1     # after a failure, the background waits this many game hours
+CAI_BG_MAX_REJECTS = 2     # a node the server rejects this often is skipped
+CAI_DAY_HOURS = 24
 # --- end Calradia AI ---
 
 ####################################################################################################################
@@ -9280,20 +9313,34 @@ scripts = [
   ("game_receive_url_response",
     [
       # --- Calradia AI (milestone 2): the callback of docs/protocol-v1.md "Game state machine" ---
-      # A v1 frame "R|C|T|R" arrives as reg0 = R, reg1 = C, reg2 = R, s0 = T. A transport
-      # failure arrives as an empty body: num_integers = 1, reg0 = 0, num_strings = 0
-      # (docs/http-ipc.md). The registers are copied into locals first; s0 is copied into s67
-      # only when the frame is delivered. This script calls no other script.
+      # A v1 frame "R|C|T|R" arrives as reg0 = R, reg1 = C, reg2 = R, s0 = T; a v2 frame
+      # "R|C|T|K|N|W|X|R" as reg0 = R, reg1 = C, reg2..reg5 = K N W X, reg6 = R, s0 = T.
+      # A transport failure arrives as an empty body: num_integers = 1, reg0 = 0,
+      # num_strings = 0 (docs/http-ipc.md). The registers are copied into locals first; s0
+      # is copied into s67 only when the frame is delivered, before any script is called.
       (store_script_param, ":num_integers", 1),
       (store_script_param, ":num_strings", 2),
       (assign, ":rid", reg0),
       (assign, ":code", reg1),
       (assign, ":rid_echo", reg2),
+      (assign, ":act_kind", 0),
+      (assign, ":act_amount", 0),
+      (assign, ":act_troop", 0),
+      (assign, ":act_target", 0),
+      (try_begin),
+        (eq, ":num_integers", CAI_FRAME_V2_INTS),
+        (assign, ":act_kind", reg2),
+        (assign, ":act_amount", reg3),
+        (assign, ":act_troop", reg4),
+        (assign, ":act_target", reg5),
+        (assign, ":rid_echo", reg6),
+      (try_end),
 
-      # Well-formed (WF): three integers, one string, both rids equal and positive.
+      # Well-formed (WF): three or seven integers, one string, both rids equal and positive.
       (assign, ":well_formed", 0),
       (try_begin),
-        (eq, ":num_integers", 3),
+        (this_or_next|eq, ":num_integers", CAI_FRAME_V1_INTS),
+        (eq, ":num_integers", CAI_FRAME_V2_INTS),
         (eq, ":num_strings", 1),
         (eq, ":rid", ":rid_echo"),
         (gt, ":rid", 0),
@@ -9306,8 +9353,6 @@ scripts = [
       (assign, ":for_conversation", 0),
       (try_begin),
         (is_between, "$cai_tx_op", CAI_OP_TALK, CAI_OP_RESULT + 1),
-        (eq, "$cai_ui_open", 1),
-        (eq, "$cai_tx_inst", "$cai_prsnt_inst"),
         (eq, "$cai_tx_job", "$cai_conv_job"),
         (is_between, "$cai_conv_state", CAI_CONV_SUBMITTING, CAI_CONV_PENDING + 1),
         (assign, ":for_conversation", 1),
@@ -9333,30 +9378,31 @@ scripts = [
         (eq, ":rid", "$cai_tx_rid"),
         (assign, "$cai_tx_rid", 0),
         (try_begin),
-          (eq, "$cai_tx_op", CAI_OP_ACK),
-          (eq, "$cai_ui_open", 1),
-          (eq, "$cai_tx_inst", "$cai_prsnt_inst"),
-          (eq, ":code", CAI_CODE_READY),
-          (assign, "$cai_ack_owed_job", 0),
-          (assign, "$cai_ack_confirmed", 1),
-        (try_end),
-        (try_begin),
           (eq, ":for_conversation", 1),
           (str_store_string_reg, s67, s0),
           (try_begin),
             (eq, ":code", CAI_CODE_READY),
-            # s67 is Hrodvar's reply.
+            # s67 is the NPC's reply; a v2 frame may add a proposed action for this NPC.
             (assign, "$cai_conv_state", CAI_CONV_READY),
             (assign, "$cai_reply_new", 1),
+            (assign, "$cai_reply_act_kind", 0),
+            (assign, "$cai_reply_act_amount", 0),
+            (try_begin),
+              (gt, ":act_kind", 0),
+              (eq, ":act_troop", "$cai_talk_troop"),
+              (assign, "$cai_reply_act_kind", ":act_kind"),
+              (assign, "$cai_reply_act_amount", ":act_amount"),
+            (try_end),
           (else_try),
             (eq, ":code", CAI_CODE_PENDING),
             (assign, "$cai_conv_state", CAI_CONV_PENDING),
           (else_try),
             # Terminal: s67 becomes the player-facing reason (T is a reason token here).
             (assign, "$cai_conv_state", CAI_CONV_FAILED),
+            (call_script, "script_cai_store_npc_name"),
             (try_begin),
               (eq, ":code", CAI_CODE_FAILED),
-              (str_store_string, s67, "@The character could not answer ({s67})."),
+              (str_store_string, s67, "@{s59} could not answer ({s67})."),
             (else_try),
               (eq, ":code", CAI_CODE_CANCELED),
               (assign, "$cai_conv_state", CAI_CONV_CANCELED),
@@ -9375,6 +9421,10 @@ scripts = [
             (try_end),
             (assign, "$cai_reply_new", 1),
           (try_end),
+        (else_try),
+          # A world node sent in the background (milestones 4-6). s0 is still T.
+          (is_between, "$cai_tx_op", CAI_OP_EVENT, CAI_OP_TICK + 1),
+          (call_script, "script_cai_background_done", ":code", ":act_kind", ":act_amount", ":act_troop", ":act_target"),
         (try_end),
       (else_try),
         # (d) Empty body (transport failure), a malformed frame, or our own reply with a
@@ -9390,6 +9440,9 @@ scripts = [
             (str_store_string, s67, "@calradia-server could not be reached."),
           (try_end),
           (assign, "$cai_reply_new", 1),
+        (else_try),
+          (is_between, "$cai_tx_op", CAI_OP_EVENT, CAI_OP_TICK + 1),
+          (call_script, "script_cai_background_done", -1, 0, 0, 0, 0),
         (try_end),
       (try_end),
       # --- end Calradia AI ---
@@ -50948,17 +51001,21 @@ scripts = [
   # Sends nothing while a request is outstanding ($cai_tx_rid != 0): the engine collects
   # response bodies in one unlocked buffer, so at most one request may be in flight.
   # INPUT: arg1 = op (CAI_OP_TALK, CAI_OP_RESULT or CAI_OP_CANCEL), arg2 = job id
-  #        For CAI_OP_TALK, s66 holds the player's message.
+  #        For CAI_OP_TALK, s66 holds the player's message, and $cai_talk_troop selects
+  #        the talk: 0 = Hrodvar (/v1/talk), a troop = that character (/v2/talk).
   # The URL templates are the quick-string operands themselves, so that encode_url = 1
   # percent-encodes every substituted value. Registers: reg60 = rid, reg61 = job,
-  # reg62 = npc, reg63 = day; s65 = player name (scratch), s66 = message.
+  # reg62 = npc, reg63 = day; s65 = player name (scratch), s66 = message; for /v2/talk
+  # also reg39..reg59 and s50..s56 from script_cai_store_context; for world nodes
+  # (CAI_OP_EVENT, CAI_OP_WORLD, CAI_OP_TICK) the job id is the node id, and the
+  # scripts cai_store_log_entry / cai_store_snapshot fill the registers of their route.
   ("cai_tx_send",
     [
       (store_script_param, ":op", 1),
       (store_script_param, ":job", 2),
       (try_begin),
         (eq, "$cai_tx_rid", 0),
-        (is_between, ":op", CAI_OP_TALK, CAI_OP_ACK + 1),
+        (is_between, ":op", CAI_OP_TALK, CAI_OP_TICK + 1),
         (call_script, "script_cai_new_id", "$cai_now_ms", "$cai_tx_prev_rid"),
         (assign, "$cai_tx_rid", reg0),
         (assign, "$cai_tx_prev_rid", reg0),
@@ -50968,77 +51025,489 @@ scripts = [
         (assign, "$cai_tx_inst", "$cai_prsnt_inst"),
         (assign, reg60, "$cai_tx_rid"),
         (assign, reg61, ":job"),
+        (store_current_day, reg63),
+        (str_store_troop_name, s65, "trp_player"),
         (try_begin),
-          (gt, "$cai_npc", 0),
-          (assign, reg(70), "$cai_campaign_a"),
-          (assign, reg(71), "$cai_campaign_b"),
-          (assign, reg(72), "$cai_branch_a"),
-          (assign, reg(73), "$cai_branch_b"),
-          (assign, reg(74), "$cai_session_a"),
-          (assign, reg(75), "$cai_session_b"),
-          (try_begin),
-            (eq, ":op", CAI_OP_TALK),
-            (call_script, "script_troop_get_player_relation", "$cai_npc"),
-            (assign, reg(64), reg0),
-            (store_troop_faction, reg62, "$cai_npc"),
-            (assign, reg(65), "$players_kingdom"),
-            (troop_get_slot, reg(66), "trp_player", slot_troop_renown),
-            (assign, reg(67), "$player_honor"),
-            (party_get_cur_town, reg(68), "p_main_party"),
-            (try_begin),
-              (neg|is_between, reg(68), centers_begin, centers_end),
-              (assign, reg(68), -1),
-            (try_end),
-            (assign, reg(69), 0),
-            (try_begin),
-              (main_party_has_troop, "$cai_npc"),
-              (assign, reg(69), 1),
-            (try_end),
-            (store_current_day, reg63),
-            (str_store_troop_name, s65, "trp_player"),
-            (try_begin),
-              (eq, "$cai_npc", "trp_npc8"),
-              (send_message_to_url, "@http://127.0.0.1:8766/v2/talk?v=2&rid={reg60}&job={reg61}&camp={reg70}-{reg71}&branch={reg72}-{reg73}&conv={reg74}-{reg75}&npc=trp%5Fnpc8&day={reg63}&nf={reg62}&pf={reg65}&rel={reg64}&ren={reg66}&hon={reg67}&loc={reg68}&status={reg69}&pname={s65}&msg={s66}&end=1", 1),
-            (else_try),
-              (eq, "$cai_npc", "trp_npc12"),
-              (send_message_to_url, "@http://127.0.0.1:8766/v2/talk?v=2&rid={reg60}&job={reg61}&camp={reg70}-{reg71}&branch={reg72}-{reg73}&conv={reg74}-{reg75}&npc=trp%5Fnpc12&day={reg63}&nf={reg62}&pf={reg65}&rel={reg64}&ren={reg66}&hon={reg67}&loc={reg68}&status={reg69}&pname={s65}&msg={s66}&end=1", 1),
-            (try_end),
-          (else_try),
-            (eq, ":op", CAI_OP_RESULT),
-            (send_message_to_url, "@http://127.0.0.1:8766/v2/result?v=2&rid={reg60}&job={reg61}&camp={reg70}-{reg71}&branch={reg72}-{reg73}&conv={reg74}-{reg75}&end=1", 1),
-          (else_try),
-            (eq, ":op", CAI_OP_CANCEL),
-            (send_message_to_url, "@http://127.0.0.1:8766/v2/cancel?v=2&rid={reg60}&job={reg61}&camp={reg70}-{reg71}&branch={reg72}-{reg73}&conv={reg74}-{reg75}&end=1", 1),
-          (else_try),
-            (send_message_to_url, "@http://127.0.0.1:8766/v2/ack?v=2&rid={reg60}&job={reg61}&camp={reg70}-{reg71}&branch={reg72}-{reg73}&conv={reg74}-{reg75}&end=1", 1),
-          (try_end),
-        (else_try),
           (eq, ":op", CAI_OP_TALK),
+          (eq, "$cai_talk_troop", 0),
           (assign, reg62, CAI_NPC_HRODVAR),
-          (store_current_day, reg63),
-          (str_store_troop_name, s65, "trp_player"),
           (send_message_to_url, "@http://127.0.0.1:8766/v1/talk?v=1&rid={reg60}&job={reg61}&npc={reg62}&day={reg63}&pname={s65}&msg={s66}&end=1", 1),
         (else_try),
           (eq, ":op", CAI_OP_RESULT),
           (send_message_to_url, "@http://127.0.0.1:8766/v1/result?v=1&rid={reg60}&job={reg61}&end=1", 1),
         (else_try),
+          (eq, ":op", CAI_OP_CANCEL),
           (send_message_to_url, "@http://127.0.0.1:8766/v1/cancel?v=1&rid={reg60}&job={reg61}&end=1", 1),
+        (else_try),
+          (eq, ":op", CAI_OP_TALK),
+          # A character: protocol v2, with v2 frames (f=2).
+          (call_script, "script_cai_store_context", "$cai_talk_troop"),
+          (send_message_to_url, "@http://127.0.0.1:8766/v2/talk?v=2&rid={reg60}&job={reg61}&camp={reg44}&conv={reg45}&head={reg46}&troop={reg47}&day={reg63}&fac={reg48}&pfac={reg49}&frel={reg50}&rel={reg51}&rep={reg52}&occ={reg53}&st={reg54}&ren={reg55}&hon={reg56}&loc={reg57}&ldist={reg58}&pg={reg59}&wars={reg43}&f=2&whead={reg42}&gold={reg41}&pgold={reg40}&hres={reg39}&pname={s65}&nname={s50}&fname={s51}&pfname={s52}&lname={s53}&ruler={s54}&spouse={s55}&father={s56}&msg={s66}&end=1", 1),
+        (else_try),
+          (eq, ":op", CAI_OP_EVENT),
+          (call_script, "script_cai_store_log_entry"),
+          (send_message_to_url, "@http://127.0.0.1:8766/v2/event?v=2&rid={reg60}&job={reg61}&camp={reg44}&whead={reg42}&day={reg63}&idx={reg29}&type={reg30}&time={reg31}&actor={reg32}&center={reg33}&clord={reg34}&cfac={reg35}&troop={reg36}&tfac={reg37}&fac={reg38}&pname={s65}&pfname={s52}&end=1", 1),
+        (else_try),
+          (eq, ":op", CAI_OP_WORLD),
+          (call_script, "script_cai_store_snapshot"),
+          (send_message_to_url, "@http://127.0.0.1:8766/v2/world?v=2&rid={reg60}&job={reg61}&camp={reg44}&whead={reg42}&day={reg63}&alive={reg28}&pname={s65}&pfname={s52}&wars={s53}&owners={s54}&lords={s55}&lords2={s56}&end=1", 1),
+        (else_try),
+          (eq, ":op", CAI_OP_TICK),
+          (assign, reg44, "$cai_campaign"),
+          (assign, reg42, "$cai_world_head"),
+          (assign, reg46, "$cai_mem_head"),
+          (call_script, "script_cai_store_player_realm"),
+          (send_message_to_url, "@http://127.0.0.1:8766/v2/tick?v=2&rid={reg60}&job={reg61}&camp={reg44}&whead={reg42}&day={reg63}&head={reg46}&pname={s65}&pfname={s52}&end=1", 1),
+        (try_end),
+      (try_end),
+    ]),
+  # --- end Calradia AI ---
+  # --- Calradia AI (milestone 3): character conversations; see docs/protocol-v1.md, "Protocol v2" ---
+
+
+  # script_cai_store_npc_name: s59 = the name of the NPC in the talk window ($cai_talk_troop,
+  # or Hrodvar when it is 0).
+  ("cai_store_npc_name",
+    [
+      (try_begin),
+        (gt, "$cai_talk_troop", 0),
+        (str_store_troop_name, s59, "$cai_talk_troop"),
+      (else_try),
+        (str_store_string, s59, "@Hrodvar"),
+      (try_end),
+    ]),
+
+  # script_cai_store_context: reads the live game state that /v2/talk carries. It only reads
+  # game state. INPUT: arg1 = the NPC's troop.
+  # OUTPUT: reg44 camp, reg45 conv, reg46 head, reg47 troop, reg48 NPC faction, reg49 player
+  # faction ($players_kingdom), reg50 relation of the NPC's faction with fac_player_faction,
+  # reg51 NPC's relation with the player, reg52 reputation type, reg53 occupation, reg54
+  # status bits (CAI_ST_*), reg55 player renown, reg56 player honour, reg57 nearest
+  # settlement (0 if none), reg58 its map distance, reg59 player troop type (1 = female),
+  # reg43 the active realms the NPC's faction is at war with (bit k = kingdoms_begin + k),
+  # reg42 the world head, reg41 the NPC's purse, reg40 the player's gold, reg39 the outcome
+  # of the head turn's proposal (CAI_OUT_*, 0 = none);
+  # s50 NPC name, s51 NPC faction name, s52 player faction name, s53 settlement name,
+  # s54 the NPC's liege, s55 spouse and s56 father (each empty if none or not applicable).
+  ("cai_store_context",
+    [
+      (store_script_param, ":troop", 1),
+      (assign, reg44, "$cai_campaign"),
+      (assign, reg45, "$cai_conv_id"),
+      (assign, reg46, "$cai_mem_head"),
+      (assign, reg47, ":troop"),
+      (store_troop_faction, ":faction", ":troop"),
+      (assign, reg48, ":faction"),
+      (assign, reg49, "$players_kingdom"),
+      (store_relation, reg50, ":faction", "fac_player_faction"),
+      (troop_get_slot, reg51, ":troop", slot_troop_player_relation),
+      (troop_get_slot, reg52, ":troop", slot_lord_reputation_type),
+      (troop_get_slot, reg53, ":troop", slot_troop_occupation),
+
+      (assign, ":status", 0),
+      (try_begin),
+        (main_party_has_troop, ":troop"),
+        (val_or, ":status", CAI_ST_IN_PARTY),
+      (try_end),
+      # Every hero's captor slot is set to -1 at game start; p_main_party is party 0.
+      (troop_get_slot, ":captor", ":troop", slot_troop_prisoner_of_party),
+      (try_begin),
+        (eq, ":captor", "p_main_party"),
+        (neg|main_party_has_troop, ":troop"),
+        (val_or, ":status", CAI_ST_PLAYER_PRISONER),
+      (else_try),
+        (gt, ":captor", 0),
+        (val_or, ":status", CAI_ST_OTHER_PRISONER),
+      (try_end),
+      (try_begin),
+        (faction_slot_eq, ":faction", slot_faction_leader, ":troop"),
+        (val_or, ":status", CAI_ST_FACTION_LEADER),
+      (try_end),
+      (try_begin),
+        (faction_slot_eq, ":faction", slot_faction_marshall, ":troop"),
+        (val_or, ":status", CAI_ST_MARSHAL),
+      (try_end),
+      (try_begin),
+        (troop_slot_eq, "trp_player", slot_troop_spouse, ":troop"),
+        (val_or, ":status", CAI_ST_SPOUSE),
+      (try_end),
+      (try_begin),
+        (troop_slot_eq, "trp_player", slot_troop_betrothed, ":troop"),
+        (val_or, ":status", CAI_ST_BETROTHED),
+      (try_end),
+      (try_begin),
+        (gt, "$players_kingdom", 0),
+        (eq, "$player_has_homage", 1),
+        (val_or, ":status", CAI_ST_PLAYER_VASSAL),
+      (try_end),
+      (try_begin),
+        (eq, "$players_kingdom", "fac_player_supporters_faction"),
+        (faction_slot_eq, "fac_player_supporters_faction", slot_faction_state, sfs_active),
+        (faction_slot_eq, "fac_player_supporters_faction", slot_faction_leader, "trp_player"),
+        (val_or, ":status", CAI_ST_PLAYER_RULER),
+      (try_end),
+      (assign, reg54, ":status"),
+
+      (troop_get_slot, reg55, "trp_player", slot_troop_renown),
+      (assign, reg56, "$player_honor"),
+      # The settlement nearest to the player's party.
+      (assign, ":nearest", 0),
+      (assign, ":nearest_dist", 100000),
+      (try_for_range, ":center", centers_begin, centers_end),
+        (store_distance_to_party_from_party, ":dist", ":center", "p_main_party"),
+        (lt, ":dist", ":nearest_dist"),
+        (assign, ":nearest_dist", ":dist"),
+        (assign, ":nearest", ":center"),
+      (try_end),
+      (try_begin),
+        (eq, ":nearest", 0),
+        (assign, ":nearest_dist", 0),
+      (try_end),
+      (assign, reg57, ":nearest"),
+      (assign, reg58, ":nearest_dist"),
+      (troop_get_type, reg59, "trp_player"),
+
+      (str_store_troop_name, s50, ":troop"),
+      (str_store_faction_name, s51, ":faction"),
+      (str_clear, s52),
+      (try_begin),
+        (gt, "$players_kingdom", 0),
+        (str_store_faction_name, s52, "$players_kingdom"),
+      (try_end),
+      (str_clear, s53),
+      (try_begin),
+        (gt, ":nearest", 0),
+        (str_store_party_name, s53, ":nearest"),
+      (try_end),
+
+      # The realms at war with the NPC's own.
+      (assign, ":wars", 0),
+      (try_for_range, ":realm", kingdoms_begin, kingdoms_end),
+        (neq, ":realm", ":faction"),
+        (faction_slot_eq, ":realm", slot_faction_state, sfs_active),
+        (store_relation, ":realm_relation", ":faction", ":realm"),
+        (lt, ":realm_relation", 0),
+        (store_sub, ":bit", ":realm", kingdoms_begin),
+        (assign, ":mask", 1),
+        (val_lshift, ":mask", ":bit"),
+        (val_or, ":wars", ":mask"),
+      (try_end),
+      (assign, reg43, ":wars"),
+      # The NPC's liege (a realm's leader may be the player, troop 0), spouse and father.
+      (str_clear, s54),
+      (try_begin),
+        (is_between, ":faction", kingdoms_begin, kingdoms_end),
+        (faction_get_slot, ":ruler", ":faction", slot_faction_leader),
+        (ge, ":ruler", 0),
+        (neq, ":ruler", ":troop"),
+        (str_store_troop_name, s54, ":ruler"),
+      (try_end),
+      (str_clear, s55),
+      (troop_get_slot, ":spouse", ":troop", slot_troop_spouse),
+      (try_begin),
+        (gt, ":spouse", 0), # 0 is the player, reported by CAI_ST_SPOUSE
+        (str_store_troop_name, s55, ":spouse"),
+      (try_end),
+      (str_clear, s56),
+      (troop_get_slot, ":father", ":troop", slot_troop_father),
+      (try_begin),
+        (gt, ":father", 0),
+        (str_store_troop_name, s56, ":father"),
+      (try_end),
+      # Milestones 4-6: the save's world head, the purses, and what became of the head
+      # turn's proposal.
+      (assign, reg42, "$cai_world_head"),
+      (try_begin),
+        (is_between, ":troop", kings_begin, kingdom_ladies_end),
+        (troop_get_slot, reg41, ":troop", slot_troop_wealth),
+      (else_try),
+        (store_troop_gold, reg41, ":troop"),
+      (try_end),
+      (store_troop_gold, reg40, "trp_player"),
+      (assign, reg39, "$cai_head_outcome"),
+    ]),
+
+  # --- Milestones 4-6: world awareness, actions and autonomy ---
+
+  # script_cai_store_player_realm: s52 = the name of the realm the player founded, if it is
+  # active (the server names fac_player_supporters_faction with it), else empty.
+  ("cai_store_player_realm",
+    [
+      (str_clear, s52),
+      (try_begin),
+        (faction_slot_eq, "fac_player_supporters_faction", slot_faction_state, sfs_active),
+        (str_store_faction_name, s52, "fac_player_supporters_faction"),
+      (try_end),
+    ]),
+
+  # script_cai_store_log_entry: the next Native log entry to forward (number
+  # $cai_log_sent + 1), read from Native's log arrays. Only reads game state.
+  # OUTPUT: reg44 camp, reg42 world head, reg29 index, reg30 type, reg31 time (hours),
+  # reg32 actor, reg33 center, reg34 center's lord, reg35 center's faction, reg36 troop,
+  # reg37 troop's faction, reg38 faction; s52 the player's realm.
+  ("cai_store_log_entry",
+    [
+      (store_add, ":entry", "$cai_log_sent", 1),
+      (assign, reg44, "$cai_campaign"),
+      (assign, reg42, "$cai_world_head"),
+      (assign, reg29, ":entry"),
+      (troop_get_slot, reg30, "trp_log_array_entry_type", ":entry"),
+      (troop_get_slot, reg31, "trp_log_array_entry_time", ":entry"),
+      (troop_get_slot, reg32, "trp_log_array_actor", ":entry"),
+      (troop_get_slot, reg33, "trp_log_array_center_object", ":entry"),
+      (troop_get_slot, reg34, "trp_log_array_center_object_lord", ":entry"),
+      (troop_get_slot, reg35, "trp_log_array_center_object_faction", ":entry"),
+      (troop_get_slot, reg36, "trp_log_array_troop_object", ":entry"),
+      (troop_get_slot, reg37, "trp_log_array_troop_object_faction", ":entry"),
+      (troop_get_slot, reg38, "trp_log_array_faction_object", ":entry"),
+      (call_script, "script_cai_store_player_realm"),
+    ]),
+
+  # script_cai_store_snapshot: the state the server compares day by day. Only reads game
+  # state. The lists are built digit by digit ("." then the number), so they hold only
+  # digits and dots. OUTPUT: reg44 camp, reg42 world head, reg28 active realms (bit k =
+  # kingdoms_begin + k); s53 wars (1 per realm pair i < j at war), s54 the faction of each
+  # walled center, s55 and s56 faction * 2 + captured for each king, lord and claimant (in
+  # two halves, split at trp_knight_4_1); s52 the player's realm.
+  ("cai_store_snapshot",
+    [
+      (assign, reg44, "$cai_campaign"),
+      (assign, reg42, "$cai_world_head"),
+      (assign, ":alive", 0),
+      (try_for_range, ":realm", kingdoms_begin, kingdoms_end),
+        (faction_slot_eq, ":realm", slot_faction_state, sfs_active),
+        (store_sub, ":bit", ":realm", kingdoms_begin),
+        (assign, ":mask", 1),
+        (val_lshift, ":mask", ":bit"),
+        (val_or, ":alive", ":mask"),
+      (try_end),
+      (assign, reg28, ":alive"),
+      (str_clear, s53),
+      (try_for_range, ":realm", kingdoms_begin, kingdoms_end),
+        (store_add, ":other_begin", ":realm", 1),
+        (try_for_range, ":other", ":other_begin", kingdoms_end),
+          (store_relation, ":relation", ":realm", ":other"),
+          (assign, reg1, 0),
+          (try_begin),
+            (lt, ":relation", 0),
+            (assign, reg1, 1),
+          (try_end),
+          (str_store_string, s53, "@{s53}.{reg1}"),
+        (try_end),
+      (try_end),
+      (str_clear, s54),
+      (try_for_range, ":center", walled_centers_begin, walled_centers_end),
+        (store_faction_of_party, reg1, ":center"),
+        (str_store_string, s54, "@{s54}.{reg1}"),
+      (try_end),
+      (str_clear, s55),
+      (str_clear, s56),
+      (try_for_range, ":lord", kings_begin, kingdom_ladies_begin),
+        (store_troop_faction, reg1, ":lord"),
+        (val_mul, reg1, 2),
+        (try_begin),
+          (troop_slot_ge, ":lord", slot_troop_prisoner_of_party, 0),
+          (val_add, reg1, 1),
+        (try_end),
+        (try_begin),
+          (lt, ":lord", "trp_knight_4_1"),
+          (str_store_string, s55, "@{s55}.{reg1}"),
+        (else_try),
+          (str_store_string, s56, "@{s56}.{reg1}"),
+        (try_end),
+      (try_end),
+      (call_script, "script_cai_store_player_realm"),
+    ]),
+
+  # script_cai_background_send: run every frame on the world map (a simple trigger). When
+  # the transport is idle and the talk window closed, sends one world node: an unsent Native
+  # log entry, else the daily snapshot, else the daily tick. A node that failed is sent
+  # again with the same id (the server answers a repeat as the first time); after a
+  # failure the sender waits CAI_BG_RETRY_HOURS game hours.
+  ("cai_background_send",
+    [
+      (try_begin),
+        (eq, "$cai_tx_rid", 0),
+        (neg|is_presentation_active, "prsnt_cai_talk"),
+        (store_current_hours, ":now"),
+        (ge, ":now", "$cai_bg_retry_hours"),
+        (assign, ":op", 0),
+        (try_begin),
+          (gt, "$cai_bg_node", 0),
+          (assign, ":op", "$cai_bg_kind"),
+        (else_try),
+          (lt, "$cai_log_sent", "$num_log_entries"),
+          (assign, ":op", CAI_OP_EVENT),
+        (else_try),
+          (ge, ":now", "$cai_next_snapshot_hours"),
+          (assign, ":op", CAI_OP_WORLD),
+        (else_try),
+          (ge, ":now", "$cai_next_tick_hours"),
+          (assign, ":op", CAI_OP_TICK),
+        (try_end),
+        (gt, ":op", 0),
+        (try_begin),
+          (eq, "$cai_campaign", 0),
+          (call_script, "script_cai_new_id", ":now", 0),
+          (assign, "$cai_campaign", reg0),
+        (try_end),
+        (try_begin),
+          (eq, "$cai_bg_node", 0),
+          (call_script, "script_cai_new_id", ":now", "$cai_world_head"),
+          (assign, "$cai_bg_node", reg0),
+          (assign, "$cai_bg_kind", ":op"),
+          (assign, "$cai_bg_rejects", 0),
+        (try_end),
+        (call_script, "script_cai_tx_send", ":op", "$cai_bg_node"),
+      (try_end),
+    ]),
+
+  # script_cai_background_done: the answer to a world node, from the callback (s0 = T).
+  # INPUT: arg1 = code (-1: transport failure or a malformed frame), arg2..arg5 = K N W X.
+  # Stored: the node becomes the world head (a tick's initiative is carried out). Rejected
+  # (code 4): the node gets a new id; after CAI_BG_MAX_REJECTS the item is skipped, so a bad
+  # entry cannot block the ones after it. Anything else: wait, then send the node again.
+  ("cai_background_done",
+    [
+      (store_script_param, ":code", 1),
+      (store_script_param, ":kind", 2),
+      (store_script_param, ":amount", 3),
+      (store_script_param, ":troop", 4),
+      (store_script_param, ":target", 5),
+      (str_store_string_reg, s57, s0),
+      (store_current_hours, ":now"),
+      (assign, ":skip", 0),
+      (try_begin),
+        (eq, ":code", CAI_CODE_READY),
+        (assign, "$cai_world_head", "$cai_bg_node"),
+        (assign, ":skip", 1),
+        (try_begin),
+          (eq, "$cai_bg_kind", CAI_OP_TICK),
+          (gt, ":kind", 0),
+          (call_script, "script_cai_execute_initiative", ":kind", ":amount", ":troop", ":target"),
+        (try_end),
+      (else_try),
+        (eq, ":code", CAI_CODE_BAD_REQUEST),
+        (val_add, "$cai_bg_rejects", 1),
+        (assign, "$cai_bg_node", 0),
+        (try_begin),
+          (ge, "$cai_bg_rejects", CAI_BG_MAX_REJECTS),
+          (assign, ":skip", 1),
+        (try_end),
+      (else_try),
+        (store_add, "$cai_bg_retry_hours", ":now", CAI_BG_RETRY_HOURS),
+      (try_end),
+      # Done with this item (stored, or given up): move on.
+      (try_begin),
+        (eq, ":skip", 1),
+        (try_begin),
+          (eq, "$cai_bg_kind", CAI_OP_EVENT),
+          (val_add, "$cai_log_sent", 1),
+        (else_try),
+          (eq, "$cai_bg_kind", CAI_OP_WORLD),
+          (store_add, "$cai_next_snapshot_hours", ":now", CAI_DAY_HOURS),
+        (else_try),
+          (eq, "$cai_bg_kind", CAI_OP_TICK),
+          (store_add, "$cai_next_tick_hours", ":now", CAI_DAY_HOURS),
+        (try_end),
+        (assign, "$cai_bg_node", 0),
+        (assign, "$cai_bg_rejects", 0),
+      (try_end),
+    ]),
+
+  # script_cai_execute_initiative: what a character does on its own (milestone 6), from a
+  # tick's answer; s57 = the letter or rumour. The effect goes through
+  # script_cai_execute_action, which checks it again.
+  ("cai_execute_initiative",
+    [
+      (store_script_param, ":kind", 1),
+      (store_script_param, ":amount", 2),
+      (store_script_param, ":troop", 3),
+      (store_script_param, ":target", 4),
+      (try_begin),
+        (is_between, ":troop", active_npcs_begin, kingdom_ladies_end),
+        (call_script, "script_cai_execute_action", ":kind", ":amount", ":troop", ":target"),
+        (eq, reg0, CAI_OUT_ACCEPTED),
+        (str_store_troop_name, s58, ":troop"),
+        (try_begin),
+          (eq, ":kind", CAI_INIT_RIVALRY),
+          (display_message, "@{s57}"),
+        (else_try),
+          (dialog_box, "@{s57}", "@A letter from {s58}"),
         (try_end),
       (try_end),
     ]),
 
-  ("cai_close", [
-    (assign, "$cai_ui_open", 0),
-    (try_begin),
-      (gt, "$cai_conv_job", 0),
-      (neq, "$cai_conv_state", CAI_CONV_READY),
-      (assign, "$cai_conv_state", CAI_CONV_CANCELED),
+  # script_cai_execute_action: the only script of the mod that changes game state. Every
+  # action a character proposes (CAI_ACT_*, milestone 5) or takes on its own (CAI_INIT_*,
+  # milestone 6) is checked here against the same bounds as the server, then carried out
+  # with vanilla operations and scripts. INPUT: arg1 kind, arg2 amount, arg3 the character,
+  # arg4 the other lord (rivalry). OUTPUT: reg0 = CAI_OUT_ACCEPTED if done, else
+  # CAI_OUT_FAILED.
+  ("cai_execute_action",
+    [
+      (store_script_param, ":kind", 1),
+      (store_script_param, ":amount", 2),
+      (store_script_param, ":troop", 3),
+      (store_script_param, ":target", 4),
+      (assign, ":result", CAI_OUT_FAILED),
       (try_begin),
-        (eq, "$cai_tx_rid", 0),
-        (call_script, "script_cai_tx_send", CAI_OP_CANCEL, "$cai_conv_job"),
+        (is_between, ":troop", active_npcs_begin, kingdom_ladies_end),
+        (try_begin),
+          (this_or_next|eq, ":kind", CAI_ACT_RELATION),
+          (eq, ":kind", CAI_INIT_ATTITUDE),
+          (store_sub, ":low", 0, CAI_ACT_MAX_RELATION),
+          (store_add, ":high", CAI_ACT_MAX_RELATION, 1),
+          (try_begin),
+            (eq, ":kind", CAI_INIT_ATTITUDE),
+            (store_sub, ":low", 0, CAI_INIT_MAX_RELATION),
+            (store_add, ":high", CAI_INIT_MAX_RELATION, 1),
+          (try_end),
+          (is_between, ":amount", ":low", ":high"),
+          (neq, ":amount", 0),
+          (call_script, "script_change_player_relation_with_troop", ":troop", ":amount"),
+          (assign, ":result", CAI_OUT_ACCEPTED),
+        (else_try),
+          (eq, ":kind", CAI_ACT_GIVE),
+          (is_between, ":amount", CAI_ACT_MIN_GOLD, CAI_ACT_MAX_GIVE + 1),
+          (is_between, ":troop", kings_begin, kingdom_ladies_end),
+          (troop_get_slot, ":wealth", ":troop", slot_troop_wealth),
+          (ge, ":wealth", ":amount"),
+          (val_sub, ":wealth", ":amount"),
+          (troop_set_slot, ":troop", slot_troop_wealth, ":wealth"),
+          (troop_add_gold, "trp_player", ":amount"),
+          (assign, ":result", CAI_OUT_ACCEPTED),
+        (else_try),
+          (eq, ":kind", CAI_ACT_ASK),
+          (is_between, ":amount", CAI_ACT_MIN_GOLD, CAI_ACT_MAX_ASK + 1),
+          (store_troop_gold, ":gold", "trp_player"),
+          (ge, ":gold", ":amount"),
+          (troop_remove_gold, "trp_player", ":amount"),
+          (try_begin),
+            (is_between, ":troop", kings_begin, kingdom_ladies_end),
+            (troop_get_slot, ":wealth", ":troop", slot_troop_wealth),
+            (val_add, ":wealth", ":amount"),
+            (troop_set_slot, ":troop", slot_troop_wealth, ":wealth"),
+          (else_try),
+            (troop_add_gold, ":troop", ":amount"),
+          (try_end),
+          (assign, ":result", CAI_OUT_ACCEPTED),
+        (else_try),
+          (eq, ":kind", CAI_INIT_LETTER),
+          (assign, ":result", CAI_OUT_ACCEPTED),
+        (else_try),
+          (eq, ":kind", CAI_INIT_RIVALRY),
+          (store_sub, ":low", 0, CAI_INIT_MAX_RELATION),
+          (store_add, ":high", CAI_INIT_MAX_RELATION, 1),
+          (is_between, ":amount", ":low", ":high"),
+          (neq, ":amount", 0),
+          (is_between, ":target", active_npcs_begin, kingdom_ladies_end),
+          (neq, ":target", ":troop"),
+          (call_script, "script_troop_change_relation_with_troop", ":troop", ":target", ":amount"),
+          (assign, ":result", CAI_OUT_ACCEPTED),
+        (try_end),
       (try_end),
-    (try_end),
-    (presentation_set_duration, 0),
-  ]),
+      (assign, reg0, ":result"),
+    ]),
   # --- end Calradia AI ---
 ]

@@ -26284,14 +26284,19 @@ I suppose there are plenty of bounty hunters around to get the job done . . .", 
   [anyone|plyr,"free", [[in_meta_mission]], " Good-bye.", "close_window",[]],
   [anyone|plyr,"free", [[neg|in_meta_mission]], " [Leave]", "close_window",[]],
 #  [anyone,"free", [], "NO MATCHING SENTENCE!", "close_window",[]],
-  # --- Calradia AI (milestone 3): optional actual companion conversation ---
-  [anyone|plyr,"member_talk", [
-    (store_conversation_troop, ":cai_speaker"),
-    (this_or_next|eq, ":cai_speaker", "trp_npc8"),
-    (eq, ":cai_speaker", "trp_npc12"),
-  ], "Speak freely.", "member_pretalk", [
-    (store_conversation_troop, "$cai_npc"),
+  # --- Calradia AI (milestone 3): speak freely with the lord or companion you are talking to ---
+
+  # Appended, so vanilla dialog lines keep their order and their dlga_ ids (translations
+  # are keyed by them); the options show last in the list. The talk window opens over the
+  # dialog, and the dialog continues with "Anything else?" when it closes. See
+  # docs/protocol-v1.md, "Protocol v2".
+  [anyone|plyr,"lord_talk", [(troop_is_hero, "$g_talk_troop")], "Speak freely.", "lord_pretalk",
+   [(assign, "$cai_talk_troop", "$g_talk_troop"),
     (start_presentation, "prsnt_cai_talk"),
-  ]],
+    ]],
+  [anyone|plyr,"member_talk", [(troop_is_hero, "$g_talk_troop")], "Speak freely.", "member_pretalk",
+   [(assign, "$cai_talk_troop", "$g_talk_troop"),
+    (start_presentation, "prsnt_cai_talk"),
+    ]],
   # --- end Calradia AI ---
 ]

@@ -1,0 +1,15 @@
+id = "trp_npc7"
+name = "Deshavi"
+
+[canon]
+background = """Born in a hovel in the fens near Kulum. The Nord landlords were never seen, only their cursed overseers; the fields grew only flax for Sargoth, so the peasants stayed hungry and too cowed to rebel. Her father, a coward who cringed before them, married her to a drunken layabout who beat her. She fled, was taken by bandits in the ravines, and the one kind to her taught her to hunt and fight - until the others, jealous, knifed him. Swore never to return to her former home in Tihr except for vengeance."""
+personality = "Bitter, guarded, fierce. Calradia is 'this dungheap among the nations, populated by apes and jackals', its people ill-bred and lice-ridden. Loathes louts, bandits and men who prey on women."
+motivations = ["Money; she won't work for free", "Revenge on the bandits who murdered her lover", "A ruler who makes the roads safe for women, with gallows along them stocked with broken-necked thieves: 'the wages of indecency is death'"]
+speaking_style = "Curt and cold ('Yes? Keep your distance, by the way.'), then venomous. Bitter refrains ('It was my bad luck...'); insults: apes, jackals, 'drooling, scabby ape of an outlaw'. Calls the player 'captain'; warns louts of 'an arrow in their gullet'."
+relationships = ["Borcha: base and ignorant; she recognizes him from her bandit days", "Rolf: a vicious fighter of the Brethren of the Woods, a rival band; a bandit posing as a lord", "Klethi: a bit savage but faithful; promised to help hunt her lover's murderers", "Bunduk: a good man, but his right of appeal lets bandits talk out of the noose; Ymira pleads for mercy"]
+tendencies = ["Objects when men go hungry, unpaid or die in bloodbaths - 'the actions of a common bandit chief'", "Resents men who send women to the front line but not to the spoils", "Tracker; good with bows and polearms"]
+sources = ["module_strings.py: npc7_intro, npc7_backstory_a/b/c, npc7_backstory_later, npc7_signup_2, npc7_payment, npc7_morality_speech, npc7_personalityclash(2)_speech(_b), npc7_personalitymatch_speech(_b), npc7_home_intro, npc7_home_description(_2), npc7_home_recap, npc7_honorific, npc7_kingsupport_2/3, npc7_kingsupport_objection, npc7_intel_mission, npc7_woman_to_woman, npc7_1", "module_strings.py: npc1_personalityclash_speech(_b), npc3_kingsupport_objection, men_hungry, men_unpaid, excessive_casualties", "module_scripts.py initialize_npcs: morality egalitarian 3, no 2ary, clash npc1/npc4, match npc16, home p_village_5, contacts p_town_2, argument_victory, lrep_custodian", "module_troops.py: npc7 (female, tracker)"]
+
+[mod]
+personality = "Trust comes slowly and unspoken."
+tendencies = ["Keeps her distance and watches hands", "Answers pity with scorn"]

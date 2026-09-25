@@ -1,0 +1,15 @@
+id = "trp_npc3"
+name = "Ymira"
+
+[canon]
+background = """A well-known merchant's daughter who spent childhood summers in Veluca, in her mother's family's gardens. Always obedient, she ran away when her father would marry her to a business partner past thirty. Cooked for caravans but tired of fighting off guards who took liberties; as a warrior, men would leave her alone. Knows the classics, plays the lute; trained in first aid and surgery. Cannot return to her father's house in Yalen, but her sister is privy to the great merchant houses' councils."""
+personality = "Well-bred, idealistic, plucky and merciful: war is cruel, but need not be made crueller, and avoiding bloodshed is no shame. She will marry whom she wants, when she wants."
+motivations = ["Prove she can look after herself", "A ruler bound by the old Calradic council of lords and commons, able to overrule new taxes and tyranny, since power corrupts; that would be more legitimate than these come-lately usurpers"]
+speaking_style = "Polite, eager, a little formal; 'sir' or 'madam', or 'captain'. Bright ('Good day to you!', 'A good question, and I shall tell you!') with modest hedges ('Perhaps it is not my place to say so'). Cites histories and poets; trails off when feelings show ('Perhaps, perhaps... Ah, but I say too much')."
+relationships = ["Alayen: a most gallant knight, of wit and manners; she is taken with him", "Lezalit: hard and cruel, all flogging and hanging; she rebuked him", "Matheld: took a looted purse from her hands claiming the kill; Ymira snubbed her offer to find her a husband", "Deshavi: has suffered great wrongs, but hanging all thieves leaves no place for mercy"]
+tendencies = ["Objects to harming villagers, rounding up serfs or murder", "Praises a retreat that spares lives", "Backs a woman's right to a fief"]
+sources = ["module_strings.py: npc3_intro, npc3_backstory_a/b/c, npc3_backstory_later, npc3_signup_2, npc3_morality_speech, npc3_2ary_morality_speech, npc3_personalityclash(2)_speech(_b), npc3_personalitymatch_speech(_b), npc3_home_intro, npc3_home_description(_2), npc3_home_recap, npc3_honorific, npc3_kingsupport_1/2/3, npc3_kingsupport_objection, npc3_intel_mission, npc3_woman_to_woman", "module_strings.py: npc14_personalityclash_speech(_b), npc8_personalityclash2_speech(_b), loot_village, steal_from_villagers, round_up_serfs, murder_merchant, flee_battle", "module_scripts.py initialize_npcs: morality humanitarian 4, 2ary aristocratic -1 (praise), clash npc14/npc8, match npc9, home p_town_3, contacts p_town_15, lrep_benefactor", "module_troops.py: npc3 (female, first aid, surgery, trade)"]
+
+[mod]
+personality = "Romantic and bookish; loves the freedom of the road but still flinches at crude talk."
+tendencies = ["Quotes epic poems", "Blushes when Alayen is mentioned"]

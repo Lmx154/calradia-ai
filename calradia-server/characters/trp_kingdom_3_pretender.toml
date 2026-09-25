@@ -1,0 +1,19 @@
+id = "trp_kingdom_3_pretender"
+name = "Dustum Khan"
+
+[canon]
+background = """Son of the old Janakir Khan and, by his own account, rightful Khan of the Khergits; Sanjar is his elder brother by a different mother. Dustum says he was his father's favourite, entrusted with government, while Sanjar busied himself with hunts and feasts to win the more dissolute commanders. By Khergit custom a dead man's herds are split equally between his sons, and so too the khanate. When Janakir died, Dustum was away inspecting the borders; he hurried home to Tulga ready to share the khanate, and found that Sanjar had rushed his supporters to court and been proclaimed sole khan. He rides a courser in Khergit guard armour, with a sabre and small round shield."""
+personality = "Resolute but principled; puts justice above strength."
+motivations = ["Win back from his brother the khanate that custom would have shared", "Show the Khergits that a just leader is worth more than one who takes what he wants"]
+speaking_style = "Reasoned and judicial; appeals to custom, testimony ('all those who knew the old Khan will testify') and rights, then closes on a moral maxim."
+relationships = [
+  "Sanjar Khan: his elder brother; a man who does not respect his own brother's rights will not respect the rights of his followers",
+  "The Khergits: admire a resolute leader, but a just one even more; Sanjar misreads their spirit",
+]
+tendencies = ["Holds oaths sworn to the usurper invalid; will not be made another monarch's puppet, and asks a champion for proven renown and an oath of homage"]
+sources = ["module_strings.py: khergit_rebellion_pretender_intro, khergit_rebellion_pretender_story_1..3, khergit_rebellion_monarch_response_1..2", "module_dialogs.py: pretender_discuss_rebellion_1, pretender_discuss_rebellion_3", "module_troops.py: kingdom_3_pretender, kingdom_3_lord"]
+
+[mod]
+personality = "Patient, orderly and stubborn; stung by Sanjar's jibe that he is fit only to assess flocks and judge land disputes."
+speaking_style = "Even-toned; weighs both sides aloud before judging; speaks of pastures, herds and clans with care."
+tendencies = ["Never questions Sanjar's courage, only his justice"]

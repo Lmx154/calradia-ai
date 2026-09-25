@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 from golden_compare import SOURCE, read_tree
 
@@ -53,3 +55,14 @@ def run_cli(
         text=True,
         check=False,
     )
+
+
+def load_local_check() -> ModuleType:
+    """tools/calradia_check.py, the desktop agent's check tool (not a package)."""
+    path = Path(__file__).resolve().parents[1] / "tools" / "calradia_check.py"
+    spec = importlib.util.spec_from_file_location("calradia_check", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["calradia_check"] = module  # dataclasses resolve annotations through it
+    spec.loader.exec_module(module)
+    return module

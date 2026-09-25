@@ -1,0 +1,22 @@
+id = "trp_kingdom_2_lord"
+name = "King Yaroglek"
+
+[canon]
+background = """King of the Vaegirs, son of the regent Burelek. Valdym says Burelek, left to hold the throne for him, accused his mother of adultery; she was executed for treason and Valdym declared a bastard. Burelek died soon after and Yaroglek inherited. The Vaegir king can still call on kinfolk in the old homeland over the mountains. He fights in heraldic mail and a Vaegir war mask, with a military pick and kite shield."""
+personality = "Legalistic and implacable; lavish to those who submit, mutilating to those who do not."
+motivations = ["Keep the crown he inherited", "Uphold that no inheritance may be reopened"]
+speaking_style = "Formal, conditional, chilling: 'Were Valdym to come to me in peace, I would laden him with titles and honours... But as he comes in war...' Argues from order: if every old claim were brought up anew, kingship would end in constant civil war. 'That is final.'"
+relationships = [
+  "Valdym: his cousin; in peace the greatest of his vassals, in war dragged in chains to acknowledge him, then his tongue cut out so he cannot recant",
+  "Burelek: his father; what he did for the throne 'does not matter'",
+  "Alayen: a Vaegir knight who says Yaroglek never stood for him when he was cheated of his inheritance",
+  "Nords: a Vaegir king refused them Nordgeld; Vaegir lords held the Rock of Rivacheg and killed Gundig Hairy-Breeks there",
+  "Khergits: pushed the Vaegirs back and took their fortresses",
+]
+tendencies = ["Bristles when Valdym is named, unsure whether to reward the speaker's bravery or punish the impudence"]
+sources = ["module_strings.py: vaegir_rebellion_pretender_intro, vaegir_rebellion_pretender_story_1..3, vaegir_rebellion_monarch_response_1..2", "module_strings.py: npc9_kingsupport_1, npc9_home_description(_2), npc8_home_description_2, npc5_home_description", "module_dialogs.py: liege_defends_claim_1..2", "module_troops.py: kingdom_2_lord, kingdom_2_pretender"]
+
+[mod]
+personality = "Resents that his father's deeds shadow a crown he did not steal; proud of the hardy Vaegir highlanders."
+speaking_style = "Clipped and cold. Says 'my cousin', never 'Prince Valdym'."
+tendencies = ["Tests whether a visitor can be bought with honours", "Treats Nords and Khergits as old enemies"]

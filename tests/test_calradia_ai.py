@@ -1,15 +1,16 @@
 """CalradiaAI mod (vanilla + mods/calradia_ai/overlay): builds, and changes only what it should.
 
-The mod adds an optional companion dialogue, a camp transport diagnostic, the presentation
-prsnt_cai_talk, cai_* scripts/globals, and a new game_receive_url_response body. Everything
-else must stay vanilla (docs/protocol-v1.md and docs/protocol-v2.md):
+The mod adds one camp-menu option, two "Speak freely." dialog options (lord_talk and
+member_talk), the presentation prsnt_cai_talk, the scripts cai_new_id, cai_tx_send,
+cai_store_npc_name and cai_store_context, a new body for script_game_receive_url_response, and
+cai_* global variables (docs/protocol-v1.md). Everything else must stay vanilla:
 - files the mod does not touch are byte-identical to the golden export;
 - in the touched files, vanilla content differs only by renumbered quick-string operands
   (tag_quick_string), following the exact old -> new index mapping of quick_strings.txt;
-- new presentations and scripts are appended, so no vanilla ID moves.
-The mod's own code is checked against an opcode whitelist and may only write cai_* globals,
-so it cannot change gameplay state, and send_message_to_url (opcode 380) exists only in
-script_cai_tx_send.
+- new presentations, scripts and dialog lines are appended, so no vanilla ID moves.
+The mod's own code is checked against an opcode whitelist and may only write cai_* globals
+(it reads a few vanilla ones), so it cannot change game state, and send_message_to_url
+(opcode 380) exists only in script_cai_tx_send.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from collections.abc import Iterator
 
 import pytest
 from golden_compare import GOLDEN_EXPORT, REPO, SOURCE
-from support import read_output
+from support import load_local_check, read_output
 
 from modsys.build import build
 
@@ -57,29 +58,61 @@ NEW_VARIABLES = [
     b"cai_obj_reset",
     b"cai_obj_close",
     b"cai_tx_abandoned",
-    b"cai_ui_open",
-    b"cai_ack_owed_job",
-    b"cai_ack_confirmed",
-    b"cai_npc",
-    b"cai_campaign_a",
-    b"cai_campaign_b",
-    b"cai_branch_a",
-    b"cai_branch_b",
-    b"cai_session_a",
-    b"cai_session_b",
-    b"cai_memory_confirmed",
-    b"cai_obj_continue",
-    b"cai_obj_branch",
+    b"cai_talk_troop",
+    b"cai_campaign",
+    b"cai_mem_head",
+    b"cai_conv_id",
+    b"cai_world_head",
+    b"cai_log_sent",
+    b"cai_bg_node",
+    b"cai_bg_kind",
+    b"cai_bg_rejects",
+    b"cai_bg_retry_hours",
+    b"cai_next_snapshot_hours",
+    b"cai_next_tick_hours",
+    b"cai_head_outcome",
+    b"cai_reply_act_kind",
+    b"cai_reply_act_amount",
+    b"cai_prop_kind",
+    b"cai_prop_amount",
+    b"cai_obj_accept",
+    b"cai_obj_decline",
 ]
-NEW_SCRIPTS = [b"cai_new_id", b"cai_tx_send", b"cai_close"]
+NEW_SCRIPTS = [
+    b"cai_new_id",
+    b"cai_tx_send",
+    b"cai_store_npc_name",
+    b"cai_store_context",
+    b"cai_store_player_realm",
+    b"cai_store_log_entry",
+    b"cai_store_snapshot",
+    b"cai_background_send",
+    b"cai_background_done",
+    b"cai_execute_initiative",
+    b"cai_execute_action",
+]
+# The only script of the mod that may change game state (Milestones 5 and 6).
+EXECUTOR = b"cai_execute_action"
+# What only the executor may do: move gold, change a lord's wealth slot, and call the vanilla
+# scripts that change relations.
+EXECUTOR_OPERATIONS = {"troop_set_slot", "troop_add_gold", "troop_remove_gold"}
+EXECUTOR_VANILLA_SCRIPTS = [
+    b"change_player_relation_with_troop",
+    b"troop_change_relation_with_troop",
+]
+SLOT_TROOP_WEALTH = 11
 CHANGED_SCRIPT = b"game_receive_url_response"
 NEW_PRESENTATION = b"prsnt_cai_talk"
 MENU_OPTION = b"mno_cai_talk"
 
+# The appended dialog lines: (input state, output state), in order.
+NEW_DIALOGS = [(b"lord_talk", b"lord_pretalk"), (b"member_talk", b"member_pretalk")]
+
 # Files whose only permitted differences are renumbered quick-string operands.
-QSTR_ONLY = ["mission_templates.txt", "simple_triggers.txt", "triggers.txt"]
+QSTR_ONLY = ["mission_templates.txt", "triggers.txt"]
 CHANGED = {
     "conversation.txt",
+    "simple_triggers.txt",
     "menus.txt",
     "presentations.txt",
     "scripts.txt",
@@ -89,10 +122,33 @@ CHANGED = {
 }
 
 # Everything the mod's own code may execute: flow control, arithmetic on locals, registers
-# and cai_* globals, string registers, reading the player's name and the day, the HTTP send,
-# and its own presentation's overlays. Nothing that writes troops, parties, factions, items,
-# slots, quests or other game state.
+# and cai_* globals, string registers, reading game state (names, the day, troop and faction
+# slots, relations, distances), the HTTP send, and its own presentation's overlays. Nothing
+# that writes troops, parties, factions, items, slots, quests or other game state.
 ALLOWED_OPERATIONS = {
+    "troop_is_hero",
+    "troop_slot_ge",
+    "store_faction_of_party",
+    "store_troop_gold",
+    "store_current_hours",
+    "is_presentation_active",
+    "store_add",
+    "val_mul",
+    "dialog_box",
+    "display_message",
+    "main_party_has_troop",
+    "troop_slot_eq",
+    "faction_slot_eq",
+    "troop_get_slot",
+    "troop_get_type",
+    "store_troop_faction",
+    "store_relation",
+    "store_distance_to_party_from_party",
+    "str_store_faction_name",
+    "str_store_party_name",
+    "val_or",
+    "val_lshift",
+    "faction_get_slot",
     "call_script",
     "try_begin",
     "else_try",
@@ -112,11 +168,6 @@ ALLOWED_OPERATIONS = {
     "store_mul",
     "store_random_in_range",
     "store_current_day",
-    "store_conversation_troop",
-    "store_troop_faction",
-    "troop_get_slot",
-    "party_get_cur_town",
-    "main_party_has_troop",
     "str_is_empty",
     "str_clear",
     "str_store_string",
@@ -140,6 +191,43 @@ ALLOWED_OPERATIONS = {
     "overlay_set_position",
     "overlay_set_area_size",
     "overlay_set_display",
+}
+
+# Operations whose first operand is written. Every other operand is only read.
+WRITES_FIRST_OPERAND = {
+    "assign",
+    "val_add",
+    "val_sub",
+    "val_mod",
+    "val_or",
+    "val_lshift",
+    "store_sub",
+    "store_mul",
+    "store_add",
+    "val_mul",
+    "store_random_in_range",
+    "store_current_day",
+    "store_current_hours",
+    "store_troop_gold",
+    "store_faction_of_party",
+    "store_script_param",
+    "store_trigger_param_1",
+    "troop_get_slot",
+    "faction_get_slot",
+    "troop_get_type",
+    "store_troop_faction",
+    "store_relation",
+    "store_distance_to_party_from_party",
+}
+# The vanilla globals the mod reads (never writes): the dialog partner, and the player's
+# kingdom, honour and homage for the live context of protocol v2.
+# Milestone 4 also reads Native's log counter.
+READ_VANILLA_GLOBALS = {
+    b"g_talk_troop",
+    b"players_kingdom",
+    b"player_honor",
+    b"player_has_homage",
+    b"num_log_entries",
 }
 
 Op = tuple[int, list[int]]
@@ -230,6 +318,17 @@ def quick_strings(data: bytes) -> list[bytes]:
     return lines[1 : 1 + count]
 
 
+def dialog_line(line: bytes) -> tuple[list[bytes], list[Op], bytes, int, list[Op], bytes]:
+    """A conversation.txt line: header (id, speaker, input state), conditions, text, output
+    state, consequences, voice-over."""
+    tokens = line.split()
+    conditions, i = parse_block(tokens, 3)
+    text, output = tokens[i], int(tokens[i + 1])
+    consequences, j = parse_block(tokens, i + 2)
+    assert j == len(tokens) - 1, line
+    return tokens[:3], conditions, text, output, consequences, tokens[j]
+
+
 def names(data: bytes) -> list[bytes]:
     return data.split()
 
@@ -288,17 +387,38 @@ def mod_code(mod: dict[str, bytes]) -> Iterator[tuple[str, list[Op]]]:
             conditions, _, consequences, _, _ = menu_option(tokens, tokens.index(MENU_OPTION))
             yield "menu option conditions", conditions
             yield "menu option consequences", consequences
-    for ops in dialogue_blocks(mod):
-        yield "companion dialogue", ops
+    for line in new_dialog_lines(mod):
+        header, conditions, _, _, consequences, _ = dialog_line(line)
+        yield f"dialog {header[0].decode()} conditions", conditions
+        yield f"dialog {header[0].decode()} consequences", consequences
+    yield "simple trigger", new_simple_trigger(mod)
 
 
-def dialogue_blocks(mod: dict[str, bytes]) -> tuple[list[Op], list[Op]]:
-    line = next(line for line in mod["conversation.txt"].splitlines() if b"Speak_freely." in line)
-    tokens = line.split()
-    conditions, end = parse_block(tokens, 3)
-    assert tokens[end] == b"Speak_freely."
-    consequences, _ = parse_block(tokens, end + 2)
-    return conditions, consequences
+def simple_triggers(data: bytes) -> list[list[Op]]:
+    """simple_triggers.txt -> the operation block of each trigger."""
+    lines = [line for line in data.split(b"\n") if line.strip()]
+    count = int(lines[1])
+    result = []
+    for line in lines[2 : 2 + count]:
+        tokens = line.split()
+        ops, end = parse_block(tokens, 1)
+        assert end == len(tokens), line
+        result.append(ops)
+    return result
+
+
+def new_simple_trigger(mod: dict[str, bytes]) -> list[Op]:
+    vanilla = len(simple_triggers(golden("simple_triggers.txt")))
+    added = simple_triggers(mod["simple_triggers.txt"])[vanilla:]
+    assert len(added) == 1
+    return added[0]
+
+
+def new_dialog_lines(mod: dict[str, bytes]) -> list[bytes]:
+    """The dialog lines appended after the vanilla ones."""
+    vanilla = int(golden("conversation.txt").split(b"\n")[1])
+    lines = mod["conversation.txt"].split(b"\n")
+    return lines[2 + vanilla : 2 + vanilla + len(NEW_DIALOGS)]
 
 
 def script_index(mod: dict[str, bytes], name: bytes) -> int:
@@ -355,9 +475,13 @@ def test_variable_use_counts(mod: dict[str, bytes]) -> None:
     seeded = set(variables) - set(names((SOURCE / "variables.txt").read_bytes()))
     assert seeded
     expected = [int(n) + (variables[i] in seeded) for i, n in enumerate(old)]
-    expected[variables.index(b"players_kingdom")] += 1
-    expected[variables.index(b"player_honor")] += 1
-    assert [int(n) for n in new[: len(old)]] == expected
+    actual = [int(n) for n in new[: len(old)]]
+    # The vanilla globals the mod reads gain uses; no other count changes.
+    for i, name in enumerate(variables):
+        if name in READ_VANILLA_GLOBALS:
+            assert actual[i] > expected[i], name
+            actual[i] = expected[i]
+    assert actual == expected
     assert len(new) == len(old) + len(NEW_VARIABLES)
     assert all(int(n) > 0 for n in new[len(old) :])
 
@@ -408,17 +532,12 @@ def test_camp_menu_gets_one_option_that_opens_the_presentation(
     tokens = b_lines[k].split()
     at = tokens.index(MENU_OPTION)
     conditions, text, consequences, door, end = menu_option(tokens, at)
-    npc = (TAG_VARIABLE << OP_NUM_VALUE_BITS) | names(mod["variables.txt"]).index(b"cai_npc")
-    opens = [
-        (header_operations()["assign"], [npc, 0]),
-        (header_operations()["start_presentation"], [prsnt]),
-    ]
-    assert (conditions, text, consequences, door) == (
-        [],
-        b"AI_transport_test_(Hrodvar,_no_memory).",
-        opens,
-        b".",
+    by_name = header_operations()
+    talk_troop = (TAG_VARIABLE << OP_NUM_VALUE_BITS) | names(mod["variables.txt"]).index(
+        b"cai_talk_troop"
     )
+    opens = [(by_name["assign"], [talk_troop, 0]), (by_name["start_presentation"], [prsnt])]
+    assert (conditions, text, consequences, door) == ([], b"Talk_with_Hrodvar.", opens, b".")
     assert tokens[end] == b"mno_resume_travelling"
     # The option line minus the new option, and the menu line with one option fewer, are vanilla.
     assert same_but_renumbered(a_lines[k], b" ".join(tokens[:at] + tokens[end:]), qmap)
@@ -439,25 +558,41 @@ def test_mod_code_uses_only_whitelisted_operations(mod: dict[str, bytes]) -> Non
     allowed = {by_name[name] for name in ALLOWED_OPERATIONS}
     variables = names(mod["variables.txt"])
     own_scripts = {script_index(mod, name) for name in NEW_SCRIPTS}
+    executor_vanilla = {script_index(mod, name) for name in EXECUTOR_VANILLA_SCRIPTS}
     own_presentation = presentation_index(mod, NEW_PRESENTATION)
+    writes_first = {by_name[name] for name in WRITES_FIRST_OPERAND}
+    assert writes_first <= allowed
+    executor_only = {by_name[name] for name in EXECUTOR_OPERATIONS}
+    assert not executor_only & allowed
     blocks = list(mod_code(mod))
-    assert len(blocks) == 4 + 3 + 2 + 2
+    assert len(blocks) == len(NEW_SCRIPTS) + 1 + 3 + 2 + 2 * len(NEW_DIALOGS) + 1
+    read_globals = set()
     for where, ops in blocks:
         for opcode, args in ops:
             base = opcode & ~OPCODE_FLAGS
-            assert base in allowed, (where, opcode)
-            for position, arg in enumerate(args):
-                if tag(arg) == TAG_VARIABLE:
-                    name = variables[index(arg)]
-                    assert name.startswith(b"cai_") or (
-                        base == by_name["assign"]
-                        and position == 1
-                        and name in {b"player_honor", b"players_kingdom"}
-                    ), (where, opcode, name)
+            in_executor = where == f"script {EXECUTOR.decode()}"
+            assert base in allowed or (in_executor and base in executor_only), (where, opcode)
+            if base == by_name["troop_set_slot"]:
+                assert args[1] == SLOT_TROOP_WEALTH, where
+            for k, arg in enumerate(args):
+                if tag(arg) != TAG_VARIABLE:
+                    continue
+                name = variables[index(arg)]
+                if k == 0 and base in writes_first:
+                    assert name.startswith(b"cai_"), (where, opcode, name)
+                elif not name.startswith(b"cai_"):
+                    read_globals.add(name)
+    assert read_globals == READ_VANILLA_GLOBALS
+    for where, ops in blocks:
+        in_executor = where == f"script {EXECUTOR.decode()}"
+        for opcode, args in ops:
+            base = opcode & ~OPCODE_FLAGS
             if base == by_name["call_script"]:
-                assert tag(args[0]) == TAG_SCRIPT and index(args[0]) in own_scripts | {
-                    script_index(mod, b"troop_get_player_relation")
-                }, where
+                assert tag(args[0]) == TAG_SCRIPT, where
+                if index(args[0]) not in own_scripts:
+                    # Vanilla scripts that change state: only from the executor.
+                    assert in_executor, where
+                    assert index(args[0]) in executor_vanilla, where
             if base == by_name["start_presentation"]:
                 assert args == [(TAG_PRESENTATION << OP_NUM_VALUE_BITS) | own_presentation]
 
@@ -476,7 +611,7 @@ def test_send_message_to_url_only_in_cai_tx_send(mod: dict[str, bytes]) -> None:
         for opcode, _ in ops
         if opcode & ~OPCODE_FLAGS == SEND_MESSAGE_TO_URL
     ]
-    assert sends == [b"cai_tx_send"] * 8
+    assert sends == [b"cai_tx_send"] * 7
     # Every other compiled file is vanilla (checked above) and vanilla never sends:
     for path in sorted(SOURCE.glob("module_*.py")):
         code = [ln.split("#")[0] for ln in path.read_text(encoding="cp1254").splitlines()]
@@ -484,7 +619,7 @@ def test_send_message_to_url_only_in_cai_tx_send(mod: dict[str, bytes]) -> None:
     for path in sorted(OVERLAY.glob("module_*.py")):
         code = [ln.split("#")[0] for ln in path.read_text(encoding="cp1254").splitlines()]
         count = sum("send_message_to_url" in ln for ln in code)
-        assert count == (8 if path.name == "module_scripts.py" else 0), path.name
+        assert count == (7 if path.name == "module_scripts.py" else 0), path.name
 
 
 def test_reply_delivery_is_guarded_by_request_id(mod: dict[str, bytes]) -> None:
@@ -518,26 +653,29 @@ def overlay_templates() -> list[str]:
 
 
 def test_url_templates_follow_the_protocol(mod: dict[str, bytes]) -> None:
-    templates = [t for t in overlay_templates() if "/v1/" in t]
+    templates = overlay_templates()
     doc = PROTOCOL_DOC.read_text(encoding="utf-8")
-    expected = re.findall(r"^(/v1/\S+)$", doc, re.M)
-    assert len(templates) == len(expected) == 3
+    expected = re.findall(r"^(/v[12]/\S+)$", doc, re.M)
+    assert len(templates) == len(expected) == 7
     registers: dict[str, str] = {}
     for template, pattern in zip(templates, expected, strict=True):
-        prefix, _, path = template.partition("/v1/")
-        assert prefix == "http://127.0.0.1:8766"
+        prefix, _, path = template.partition("/v")
+        path = path[2:]
+        route = template[len(prefix) : len(prefix) + 4]
+        assert prefix == "http://127.0.0.1:8766" and route in ("/v1/", "/v2/")
         assert not set(template) & {"_", " ", "^"}
         # The doc's {regA}.. placeholders stand for one fixed register each.
         for placeholder, register in zip(
-            re.findall(r"\{reg[A-Z]\}", pattern),
-            re.findall(r"\{reg\d+\}", "/v1/" + path),
+            re.findall(r"\{reg[A-Z]+\}", pattern),
+            re.findall(r"\{reg\d+\}", route + path),
             strict=True,
         ):
             assert registers.setdefault(placeholder, register) == register
-        concrete = re.sub(r"\{reg[A-Z]\}", lambda m: registers[m[0]], pattern)
-        assert "/v1/" + path == concrete
+        concrete = re.sub(r"\{reg[A-Z]+\}", lambda m: registers[m[0]], pattern)
+        assert route + path == concrete
         params = path.partition("?")[2].split("&")
-        assert params[0] == f"v={mirrored_constants()['PROTOCOL_VERSION']}"
+        version = "PROTOCOL_VERSION" if route == "/v1/" else "PROTOCOL_V2"
+        assert params[0] == f"v={mirrored_constants()[version]}"
         assert params[1].startswith("rid={reg") and params[-1] == "end=1"
         first_text = next((i for i, p in enumerate(params) if "{s" in p), len(params) - 1)
         assert all("{reg" not in p for p in params[first_text:])
@@ -550,7 +688,7 @@ def test_url_templates_follow_the_protocol(mod: dict[str, bytes]) -> None:
             if name == b"cai_tx_send" and opcode == SEND_MESSAGE_TO_URL:
                 assert tag(args[0]) == TAG_QUICK_STRING and args[1] == 1
                 texts.append(table[index(args[0])].split(b" ", 1)[1].decode())
-    assert texts == overlay_templates()
+    assert texts == templates
 
 
 def mirrored_constants() -> dict[str, int]:
@@ -603,7 +741,13 @@ def strip_mod_blocks(lines: list[str]) -> list[str]:
 
 @pytest.mark.parametrize(
     "name",
-    ["module_game_menus.py", "module_presentations.py", "module_scripts.py", "module_dialogs.py"],
+    [
+        "module_dialogs.py",
+        "module_game_menus.py",
+        "module_presentations.py",
+        "module_scripts.py",
+        "module_simple_triggers.py",
+    ],
 )
 def test_overlay_sources_are_vanilla_outside_the_mod_blocks(name: str) -> None:
     base = (SOURCE / name).read_text(encoding="cp1254").splitlines()
@@ -632,111 +776,85 @@ def test_overlay_id_files_only_append(name: str, prefix: str, new: list[bytes]) 
     assert mine == base[: ids[-1] + 1] + added + base[ids[-1] + 1 :]
 
 
-def test_companion_dialogue_preserves_every_vanilla_line(mod, qmap):
-    old = golden("conversation.txt").splitlines()
-    new = mod["conversation.txt"].splitlines()
-    additions = [line for line in new if b"Speak_freely." in line]
-    assert len(additions) == 1
-    assert int(new[1]) == int(old[1]) + 1
-    new.remove(additions[0])
-    assert len(old) == len(new)
-    for before, after in zip(old[2:], new[2:], strict=True):
-        assert same_but_renumbered(before, after, qmap)
-    conditions, consequences = dialogue_blocks(mod)
-    ops = header_operations()
-    assert conditions[0][0] == ops["store_conversation_troop"]
-    troop_ids = (SOURCE / "ID_troops.py").read_text()
-    expected = {
-        (5 << OP_NUM_VALUE_BITS) | int(re.search(rf"trp_npc{n} = (\d+)", troop_ids)[1])
-        for n in (8, 12)
-    }
-    assert {args[1] for _, args in conditions[1:]} == expected
-    assert [op for op, _ in consequences] == [
-        ops["store_conversation_troop"],
-        ops["start_presentation"],
-    ]
+# --- tests: dialogs ---------------------------------------------------------------------
 
 
-def test_v2_templates_are_compact_versioned_and_identify_actual_troops():
-    from urllib.parse import parse_qs, quote, urlsplit
-
-    templates = [t for t in overlay_templates() if "/v2/" in t]
-    assert len(templates) == 5
-    for template in templates:
-        assert not set(template) & {"_", " ", "^"}
-        # Worst-case percent encoding with accepted numeric ranges fits old URL budget.
-        concrete = re.sub(r"\{reg\d+\}", "999999999", template)
-        concrete = concrete.replace("{s65}", quote("?" * 32)).replace("{s66}", quote("?" * 300))
-        assert len(concrete) < 4096
-        query = parse_qs(urlsplit(concrete).query)
-        assert query["v"] == ["2"] and query["end"] == ["1"]
-        assert set(query) >= {"camp", "branch", "conv", "job", "rid"}
-    assert {parse_qs(urlsplit(t).query)["npc"][0] for t in templates[:2]} == {
-        "trp_npc8",
-        "trp_npc12",
-    }
-
-
-def test_world_dictionary_matches_vanilla_export():
-    import json
-
-    world = json.loads((REPO / "calradia-server/data/world.json").read_text())
-    factions = re.findall(rb"\bfac_\w+ (\S+)", golden("factions.txt"))
-    assert world["factions"] == {
-        str(i): name.decode().replace("_", " ") for i, name in enumerate(factions)
-    }
-    settlements = re.findall(
-        rb"^\s*1 (\d+) \d+ p_(?:town|castle|village)_\d+ (\S+)",
-        golden("parties.txt"),
-        re.M,
-    )
-    assert world["locations"] == {
-        i.decode(): name.decode().replace("_", " ") for i, name in settlements
-    }
-
-
-def test_closed_or_previous_window_cannot_receive_dialogue(mod):
-    ops = dict(scripts(mod["scripts.txt"]))[CHANGED_SCRIPT]
+def test_speak_freely_dialog_lines_are_appended(
+    mod: dict[str, bytes], qmap: dict[int, int]
+) -> None:
+    a_lines, b_lines = golden("conversation.txt").split(b"\n"), mod["conversation.txt"].split(b"\n")
+    vanilla = int(a_lines[1])
+    assert b_lines[0] == a_lines[0] and int(b_lines[1]) == vanilla + len(NEW_DIALOGS)
+    for x, y in zip(a_lines[2 : 2 + vanilla], b_lines[2 : 2 + vanilla], strict=True):
+        assert same_but_renumbered(x, y, qmap)
+    assert b_lines[2 + vanilla + len(NEW_DIALOGS) :] == a_lines[2 + vanilla :]
+    # The states already exist, so dialog_states.txt is unchanged (test_untouched_files...).
+    states = golden("dialog_states.txt").split()
     by_name = header_operations()
+    prsnt = (TAG_PRESENTATION << OP_NUM_VALUE_BITS) | presentation_index(mod, NEW_PRESENTATION)
     variables = names(mod["variables.txt"])
+    var = lambda n: (TAG_VARIABLE << OP_NUM_VALUE_BITS) | variables.index(n)  # noqa: E731
+    lines = new_dialog_lines(mod)
+    assert len(lines) == len(NEW_DIALOGS)
+    for line, (state_in, state_out) in zip(lines, NEW_DIALOGS, strict=True):
+        header, conditions, text, output, consequences, voice = dialog_line(line)
+        # Unsuffixed ids: no vanilla line shares them, so no vanilla id was renumbered.
+        assert header[0] == b"dlga_" + state_in + b":" + state_out
+        assert int(header[1]) & 0x10000  # plyr
+        assert states[int(header[2])] == state_in and states[output] == state_out
+        assert text == b"Speak_freely." and voice == b"NO_VOICEOVER"
+        assert conditions == [(by_name["troop_is_hero"], [var(b"g_talk_troop")])]
+        assert consequences == [
+            (by_name["assign"], [var(b"cai_talk_troop"), var(b"g_talk_troop")]),
+            (by_name["start_presentation"], [prsnt]),
+        ]
+    ids = [line.split()[0] for line in a_lines[2 : 2 + vanilla]]
+    assert all(dialog_id not in ids for dialog_id, *_ in (dialog_line(ln)[0] for ln in lines))
 
-    def var(name):
-        return (TAG_VARIABLE << OP_NUM_VALUE_BITS) | variables.index(name)
 
-    guard = ops[
-        : next(
-            i
-            for i, (op, args) in enumerate(ops)
-            if op == by_name["eq"] and args == [var(b"cai_tx_rid"), 0]
-        )
-    ]
-    assert (by_name["eq"], [var(b"cai_ui_open"), 1]) in guard
-    assert (by_name["eq"], [var(b"cai_tx_inst"), var(b"cai_prsnt_inst")]) in guard
-    # Only TALK and RESULT can produce dialogue. ACK never duplicates the UI exchange.
-    assert (by_name["is_between"], [var(b"cai_tx_op"), 1, 3]) in guard
-    close = dict(scripts(mod["scripts.txt"]))[b"cai_close"]
-    assert close[0] == (by_name["assign"], [var(b"cai_ui_open"), 0])
-    assert close[-1] == (by_name["presentation_set_duration"], [0])
+def test_server_embeds_the_id_files_the_mod_uses() -> None:
+    """calradia-server compiles in game/module_system's ID_troops, ID_factions and ID_parties
+    (src/ids.rs) to map the indices the game sends to stable identifiers."""
+    for name in ["ID_troops.py", "ID_factions.py", "ID_parties.py"]:
+        assert not (OVERLAY / name).exists(), name
+    ids_rs = (REPO / "calradia-server" / "src" / "ids.rs").read_text()
+    embedded = re.findall(r'include_str!\("\.\./\.\./game/module_system/(ID_\w+\.py)"\)', ids_rs)
+    assert embedded == ["ID_troops.py", "ID_factions.py", "ID_parties.py"]
 
 
-def test_memory_ack_requires_ui_delivery_and_say_waits_for_ack(mod):
+# --- tests: the background sender (Milestones 4-6) --------------------------------------
+
+
+def test_one_simple_trigger_is_appended_and_only_calls_the_background_sender(
+    mod: dict[str, bytes], qmap: dict[int, int]
+) -> None:
+    a_lines = [line for line in golden("simple_triggers.txt").split(b"\n") if line.strip()]
+    b_lines = [line for line in mod["simple_triggers.txt"].split(b"\n") if line.strip()]
+    assert int(b_lines[1]) == int(a_lines[1]) + 1
+    for x, y in zip(a_lines, b_lines[: len(a_lines)], strict=True):
+        if x != a_lines[1]:
+            assert same_but_renumbered(x, y, qmap)
+    assert b_lines[len(a_lines) :][0].split()[0] == b"0.000000"  # every frame on the map
     by_name = header_operations()
-    variables = names(mod["variables.txt"])
+    send = (TAG_SCRIPT << OP_NUM_VALUE_BITS) | script_index(mod, b"cai_background_send")
+    assert new_simple_trigger(mod) == [(by_name["call_script"], [send])]
 
-    def var(name):
-        return (TAG_VARIABLE << OP_NUM_VALUE_BITS) | variables.index(name)
 
-    _, triggers = presentations(mod["presentations.txt"])[-1]
-    run = triggers[1][1]
-    owed = (by_name["assign"], [var(b"cai_ack_owed_job"), var(b"cai_conv_job")])
-    at = run.index(owed)
-    # The owed ACK is created after applying the dialogue log to its overlay.
-    assert any(
-        op == by_name["overlay_set_text"] and args[0] == var(b"cai_obj_reply")
-        for op, args in run[:at]
-    )
-    # The Say action requires both the explicit branch choice and a completed ACK.
-    event = triggers[2][1]
-    at = event.index((by_name["eq"], [var(b"cai_ack_owed_job"), 0]))
-    assert (by_name["eq"], [var(b"cai_memory_confirmed"), 1]) in event[:at]
-    assert not any(op == by_name["send_message_to_url"] for op, _ in event)
+def test_local_check_fills_every_request_template(mod: dict[str, bytes]) -> None:
+    """tools/calradia_check.py replays exactly the fields the mod sends, on every route."""
+    check = load_local_check()
+    templates = check.load_templates(mod["quick_strings.txt"].decode("cp1254"))
+    assert sorted(templates) == sorted(check.ROUTES)
+    game = check.Game(templates, 1, check.World())
+    values = {
+        "v1/talk": game.v1_talk_values(2, "Hi"),
+        "v1/result": {"job": 2},
+        "v1/cancel": {"job": 2},
+        "v2/talk": game.talk_values("trp_npc1", "Hi", 1, 2, 0),
+        "v2/event": game.event_values(2, 1, 11),
+        "v2/world": game.world_values(2),
+        "v2/tick": game.tick_values(2),
+    }
+    for route, template in templates.items():
+        url = check.fill(template, {"rid": 1, **values[route]}, 1)
+        assert url.startswith(f"http://127.0.0.1:1/{route}?") and url.endswith("&end=1")

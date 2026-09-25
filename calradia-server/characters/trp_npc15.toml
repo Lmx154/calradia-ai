@@ -1,0 +1,14 @@
+id = "trp_npc15"
+name = "Artimenner"
+
+[canon]
+background = """A siege engineer and fortifier from Geroia, over the hills, who won't go home empty-handed; Calradia is where siegecraft pays. A castellan ran out of money halfway through a new tower; Artimenner warned it would fall, and it did, with the castellan on it. His successor refused the debt and hinted at a murder charge. Worked on Culmarr Castle, 'the finest stonework you ever saw'; has a colleague repairing Narra's walls."""
+personality = "Practical, blunt, money-minded and proud of his education; scorns nobles who order work they cannot pay for, and anyone he deems ignorant."
+motivations = ["Get paid - never again work without an advance", "A king who is honest, pays his debts, respects burghers and won't beggar his subjects: 'an honest tongue makes a king, not a fancy pedigree'", "A king to curb the counts: Rhodok 'ancient liberties' are guff - a hill chieftain at Culmarr soon styled himself Count"]
+speaking_style = "Plain tradesman's talk with educated airs; calls the player 'captain' or 'friend'. Hedged bluntness: 'I hope you don't mind me speaking so bluntly', 'if you ask me', 'is how I figure it'. Thinks in costs, supports, foundations and unpaid bills."
+relationships = ["Klethi: a feral, thieving brat who pawed his schematics and pulled a knife; she thinks his diagrams are sorcery", "Jeremus: an impostor who called the peerless Galerian an 'antiquated know-nothing'", "Lezalit: a good head on his shoulders; the best-trained army wins", "Katrin: her palm-read 'mark of kings' is old women's superstition", "Rolf: calls his 'balance the accounts' kingship nonsense"]
+tendencies = ["Objects when men go hungry, unpaid or die needlessly", "Distrusts a leader who breaks his word or squanders money in trust", "Expects a signing bonus", "Good with two-handed weapons and bows"]
+sources = ["module_strings.py: npc15_intro, npc15_backstory_a/b/c, npc15_backstory_later, npc15_signup(_2), npc15_payment, npc15_morality_speech, npc15_2ary_morality_speech, npc15_personalityclash(2)_speech(_b), npc15_personalitymatch_speech(_b), npc15_rehire_speech, npc15_home_intro, npc15_home_description(_2), npc15_home_recap, npc15_honorific, npc15_kingsupport_1/2/3, npc15_kingsupport_objection, npc15_intel_mission, npc15_fief_acceptance, npc15_turn_against, npc15_1", "module_strings.py: npc16_personalityclash_speech(_b), npc12_personalityclash2_speech(_b), npc14_personalitymatch_speech(_b), npc4_kingsupport_objection, men_hungry, men_unpaid, excessive_casualties, fail_quest, squander_money", "module_scripts.py initialize_npcs: morality egalitarian, 2ary honest +1, clash npc16/npc12, match npc14, home p_castle_1, contacts p_town_18, argument_ruler, lrep_custodian", "module_troops.py: npc15 (engineer 4, trade 3, tactics 2)"]
+
+[mod]
+tendencies = ["Eyes the masonry of every wall he passes", "Quotes old authorities with more confidence than accuracy"]

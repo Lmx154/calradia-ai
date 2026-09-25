@@ -181,9 +181,27 @@ how they share names. They are deliberately not reorganized into a package.
 
 ## CalradiaAI mod
 
-CalradiaAI lets you talk to an NPC whose replies come from a local language model.
-**Camp → Talk with Hrodvar.** opens a conversation window. Type a message, click **Say**,
-and Hrodvar, a Nord sellsword riding with your company, answers in character.
+CalradiaAI lets you talk to NPCs whose replies come from a local language model.
+
+- **Speak freely.** is a new last option when you talk to a lord (`lord_talk`) or to a
+  companion in your party (`member_talk`). It opens a conversation window with that
+  character. The character's profile, the live campaign situation (faction, relation,
+  renown, honour, location, day, status) and memories of your earlier conversations go
+  into the prompt. Memories persist across game and server restarts, per campaign and per
+  savegame branch. See [`docs/characters-and-memory.md`](docs/characters-and-memory.md).
+- **Camp → Talk with Hrodvar.** is the Milestone 2 proof of concept: Hrodvar, a Nord
+  sellsword riding with your company, who has no memory.
+
+- **World awareness, actions and autonomy** (Milestones 4-6): characters know the news
+  that concerns them (battles, sieges, wars, defections, captures), may propose a small
+  action in conversation (a change of regard, an offer or request of gold that you accept
+  or refuse), and important characters form goals and plans each day and act on their own
+  (letters, changes of attitude, rivalries). See
+  [`docs/world-actions-autonomy.md`](docs/world-actions-autonomy.md).
+
+Type a message and click **Say**. Vanilla dialogs, quests, recruitment and trading are
+unchanged. The model only proposes; every effect is validated by the server and again by
+the game's single executor script, and gold never moves without your consent.
 
 It has three parts:
 
@@ -192,16 +210,23 @@ vanilla file with small edits marked `# --- Calradia AI`:
 
 | File | Change |
 |---|---|
+| `module_dialogs.py` | Appends the two "Speak freely." options (lords and companions). |
 | `module_game_menus.py` | Adds the "Talk with Hrodvar." camp option. |
 | `module_presentations.py` | Adds the `cai_talk` conversation window at the end of the list. |
-| `module_scripts.py` | Adds the protocol constants, `cai_new_id`, `cai_tx_send` (the only place that sends requests) and `game_receive_url_response`. |
+| `module_scripts.py` | Adds the protocol constants, `cai_new_id`, `cai_tx_send` (the only place that sends requests), `cai_store_npc_name`, `cai_store_context` (reads the live game state), the Milestone 4-6 scripts (`cai_background_send`, `cai_background_done`, `cai_store_log_entry`, `cai_store_snapshot`, `cai_store_player_realm`, `cai_execute_initiative`, and `cai_execute_action`, the only script that changes game state) and `game_receive_url_response`. |
+| `module_simple_triggers.py` | Appends one trigger that runs the background sender every map frame. |
 | `ID_scripts.py`, `ID_presentations.py` | The regenerated ID files, so the build needs only one pass. |
 | `variables.txt` | The vanilla global variables, followed by the mod's `cai_*` variables in a fixed order. |
 
 **The server** is `calradia-server/`, written in Rust. It runs jobs asynchronously
-(`/v1/talk`, `/v1/result`, `/v1/cancel`), so no HTTP request stays open while the model
-generates. It talks to an OpenAI-compatible endpoint, and the NPC registry is in
-`src/npc.rs`.
+(`/v1/talk`, `/v2/talk`, `/v1/result`, `/v1/cancel`), so no HTTP request stays open while
+the model generates. It talks to an OpenAI-compatible endpoint. Character profiles are
+TOML files in `calradia-server/characters/` (every companion, king and claimant), and
+kingdom lore that every lord of a realm shares is in `calradia-server/factions/`. Both are
+read at startup, so you can edit them without recompiling. Memory is a SQLite database (default
+`~/.local/share/calradia-ai/memory.sqlite3`; `--memory-db PATH` to change it,
+`--memory-report` to see what it holds, `--log-prompts` to log every prompt). Hrodvar's
+entry is in `src/npc.rs`.
 
 **The model** is served by llama.cpp through llama-swap. The default is
 `calradia-qwen3.5-9b` (Qwen3.5 9B Uncensored, Q6_K) at `http://172.17.0.1:8080/v1`.
@@ -209,6 +234,8 @@ Override them with `--upstream`/`CALRADIA_UPSTREAM` and `--model`/`CALRADIA_MODE
 
 To run it, close Warband before building or installing the mod. Changing module files
 during a session can leave saves unusable; the game loads the files only at startup.
+`tools/calradia_check.py` does all of this and checks the result (see
+[Local verification](#local-verification)); by hand:
 
 ```bash
 GAME=~/.steam/steam/steamapps/common/"MountBlade Warband"
@@ -217,7 +244,9 @@ uv run warband-build --overlay mods/calradia_ai/overlay -o "$GAME/Modules/Calrad
 cargo run --release --manifest-path calradia-server/Cargo.toml   # listens on 127.0.0.1:8766
 ```
 
-Start a **new game**. Saves from older mod versions are not supported.
+Start a **new game**. Saves from older mod versions are not supported. The first build
+fetches the Rust crates (`rusqlite` with a bundled SQLite, `serde`, `toml`) and needs a C
+compiler (`build-essential`); later builds work with `--offline`.
 
 If a request hangs, the window shows a red warning after 5 seconds. Restart
 `calradia-server` to release it. If a busy flag survives closing and reopening the
@@ -225,14 +254,29 @@ window, **Reset** appears after 15 seconds; restart the server before clicking i
 **Cancel** stops waiting for the reply and sends the cancellation when the transport
 is free.
 
-For manual tests, build the server with
-`cargo build --offline --release --manifest-path calradia-server/Cargo.toml`, then run
-`calradia-server/target/release/calradia-server --fake-llm` for a canned reply after
-1.5 seconds. `--fault MODE` injects failures (`hang`, `close`, `empty`, `wrong-rid`,
-`malformed`, `delay`) or test text (`oversize-3000`, `nonascii`). Use
-`--fake-llm --deadline-secs 1` to test a model timeout. Run one server at a time on
-port 8766, restarting it between tests; see the
-[manual acceptance checklist](docs/http-ipc.md#milestone-2-acceptance-tests).
+### Local verification
+
+On the machine with Warband and the model server, one command runs every check short of
+playing:
+
+```bash
+uv run python tools/calradia_check.py all     # tests, install into Warband, pipeline
+uv run python tools/calradia_check.py serve   # then: calradia-server for a play session
+```
+
+The pipeline stage plays the game's side of the protocol with the real model. It sends
+the request templates compiled into the installed mod, filled as the engine fills them,
+to a private calradia-server, and checks every answer as the mod's callback does. It
+covers Milestones 2 to 6: memory across windows, restarts and older saves, world news,
+actions reaching the game, and plans with their acts. Then the player runs
+[`docs/in-game-test.md`](docs/in-game-test.md), while `report` shows the server's side
+of each step. [`CLAUDE.md`](CLAUDE.md) is the procedure for the agent on the desktop.
+
+`--fake-llm` (a canned reply after 1.5 seconds) and `--fault MODE` (`hang`, `close`,
+`empty`, `wrong-rid`, `malformed`, `delay`, `oversize-3000`, `nonascii`) are for the
+automated tests and for the Milestone 2 transport checks
+([acceptance tests](docs/http-ipc.md#milestone-2-acceptance-tests)), not for testing
+characters.
 
 Further reading:
 - [`docs/protocol-v1.md`](docs/protocol-v1.md): the game↔server contract.
@@ -244,8 +288,9 @@ Known limitations:
 - `{ }` and `^` in messages are interpreted by the engine.
 - Replies are capped at 500 characters.
 - The text box has no cursor movement (engine limitation).
-- There is one NPC. The conversation window shows the last 4 exchanges, but the NPC
-  has no memory of them.
+- The conversation window shows the last 4 exchanges. Hrodvar has no memory; characters
+  reached through "Speak freely." do (see the limitations in
+  [`docs/characters-and-memory.md`](docs/characters-and-memory.md)).
 
 ## Tests and linting
 
@@ -253,6 +298,9 @@ Known limitations:
 uv run pytest -q          # full suite, about 2.5 minutes (each full build takes about 10 s)
 uv run ruff check .
 uv run ruff format --check .
+cargo test --manifest-path calradia-server/Cargo.toml     # server: protocol, memory, prompts
+cargo clippy --manifest-path calradia-server/Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path calradia-server/Cargo.toml --check
 ```
 
 | Test file | What it checks |
@@ -264,8 +312,9 @@ uv run ruff format --check .
 | `test_serialization.py` | Operand encoding (`$global`, `:local`, `@quick string`, tagged IDs, negative and large ints), opmask and opcode values, identifier escaping, `%f` float formatting, and integer division rounding down for negative numbers. |
 | `test_identifiers.py` | IDs such as `trp_player == 0` stay stable, and every generated ID file equals the reference. |
 | `test_module_data.py` | The Module_data output is byte-identical to the reference. |
-| `test_calradia_ai.py` | The CalradiaAI overlay builds in one pass. Vanilla output is preserved (untouched files are byte-identical, and vanilla scripts and presentations are an unchanged prefix). There is a single send site, the mod's code uses only whitelisted operations, the URL templates follow the protocol rules, and the protocol constants match `calradia-server/src/protocol.rs`. |
+| `test_calradia_ai.py` | The CalradiaAI overlay builds in one pass. Vanilla output is preserved (untouched files are byte-identical, and vanilla scripts, presentations and dialog lines are an unchanged prefix, so no dialog id moves). There is a single send site, the mod's code uses only whitelisted (read-only) operations and writes only `cai_*` globals, the URL templates follow the protocol rules, the protocol constants match `calradia-server/src/protocol.rs`, and the server embeds the ID files the mod uses. |
 | `test_driver_unit.py` | The driver's own logic, tested against a small fake module (fixpoint, error detection, guards, publishing). |
+| `test_calradia_check.py` | The local check tool's engine emulation: URL encoding, exact template filling, frame checks, the snapshot shape, and head tracking like the mod. (`test_calradia_ai.py` checks that it fills every template of the built mod.) |
 
 Ruff applies the full rule set to `src/` and `tests/`. For the legacy `game/` tree, it
 only checks for syntax errors and undefined names, and it does not format that tree. This

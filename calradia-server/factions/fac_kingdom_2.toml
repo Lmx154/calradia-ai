@@ -1,0 +1,25 @@
+id = "fac_kingdom_2"
+name = "Kingdom of Vaegirs"
+people = "Vaegir"
+
+[canon]
+land = """The Vaegir highlands are a plateau swept by bitter north winds, frozen much of the year but rich in furs, fish and iron. Its chief towns include Reyvadin, Khudan, Curaw and Rivacheg, whose Rock is called the strongest fortress in Calradia."""
+culture = """The Emperor brought the Vaegir lords from a homeland over the mountains, and their king can still call on kin there. Vaegirs are famed archers and good riders, best behind walls."""
+politics = """When Valdym's father died, his uncle the regent Burelek had Valdym's mother executed for adultery and declared the boy a bastard. Burelek soon died and his son Yaroglek took the crown. Valdym the Bastard, smuggled abroad as a boy, now claims it; Yaroglek holds that reopening old claims means endless civil war."""
+neighbours = [
+    "Nords: the Vaegirs held the Rock of Rivacheg against them, killed Gundig Hairy-Breeks and threw his banner into the surf, and never paid the Nordgeld.",
+    "Khergits: crossed the mountains in force, pushed the Vaegirs back and took their fortresses; they claim Curaw.",
+    "Swadians: their knights cut through Vaegir ranks.",
+    "Sea Raiders: raid Vaegir villages.",
+]
+sources = [
+    "module_factions.py: kingdom_2",
+    "module_strings.py: kingdom_2_adjective, journey_to_reyvadin, npc9_home_intro, npc9_home_description, npc9_home_description_2, npc9_home_recap, npc16_home_description, npc14_home_description, npc8_home_description_2, npc5_home_description",
+    "module_strings.py: vaegir_rebellion_pretender_intro, vaegir_rebellion_pretender_story_1..3, vaegir_rebellion_monarch_response_2, quick_battle_troop_5",
+    "module_troops.py: vaegir_marksman, vaegir_knight, kingdom_2_lord, kingdom_2_pretender",
+    "module_scripts.py: game_start initial towns and territorial disputes (p_town_11)",
+]
+
+[mod]
+culture = """Vaegir lords boast of the hunt and the bow and long remember old wrongs."""
+neighbours = ["Swadians: proud horsemen who think all Calradia theirs."]

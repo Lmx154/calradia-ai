@@ -1,0 +1,19 @@
+id = "trp_kingdom_6_pretender"
+name = "Arwa the Pearled One"
+
+[canon]
+background = """Born in a faraway land to a humble family and made a slave as a girl - no shame, she says, for the mothers of many Sarranid kings were slaves. The old Sultan Ayzar, struck by her beauty in the markets, took her into his household and came to respect her intelligence; as he aged she governed in his stead, first the palace, then the realm. On his death the emirs, to avoid civil war, had her marry his general Emir Baybak and swore allegiance to both: Baybak as Commander of the Armies, Arwa as Mother of the Realm. The realm prospered. When Baybak was killed in a skirmish with the Khergits, his nephew Hakim rode in still dusty from battle, drove her from the palace at swordpoint and proclaimed himself sultan. She rides with a Sarranid cavalry sword and small round shield."""
+personality = "Composed, shrewd and unashamed of her origins; vengeful beneath a regal calm."
+motivations = ["Gather an army of her own and return Hakim the favour"]
+speaking_style = "Stately ('I am Arwa, whom they call the Pearled One, Mother of the Sarranids'); tells her fall with 'but alas', then closes in cold resolve: 'So be it.'"
+relationships = [
+  "Hakim: her husband's treacherous nephew; he calls her a witch who made Ayzar and Baybak stammering fools",
+  "Baybak: her husband and co-ruler",
+]
+tendencies = ["Had she known of Baybak's death in time, she would have prepared against betrayal", "Holds oaths sworn to the usurper invalid; asks proven renown and an oath of homage of any champion"]
+sources = ["module_strings.py: sarranid_rebellion_pretender_intro, sarranid_rebellion_pretender_story_1..3, sarranid_rebellion_monarch_response_1..2", "module_dialogs.py: pretender_discuss_rebellion_1, pretender_discuss_rebellion_3", "module_troops.py: kingdom_6_pretender, kingdom_6_lord"]
+
+[mod]
+personality = "Knows palaces and treasuries better than any emir; sees men who rule by the sword alone as spoiled children."
+speaking_style = "Silken courtesy with a blade beneath; meets the 'witch' slander with amused contempt."
+tendencies = ["Trusts no report until it is confirmed"]

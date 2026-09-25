@@ -610,6 +610,14 @@ script_add_player_to_cur_tableau_for_coop = 608
 script_add_troop_to_cur_tableau_for_coop = 609
 script_cai_new_id = 610
 script_cai_tx_send = 611
-script_cai_close = 612
+script_cai_store_npc_name = 612
+script_cai_store_context = 613
+script_cai_store_player_realm = 614
+script_cai_store_log_entry = 615
+script_cai_store_snapshot = 616
+script_cai_background_send = 617
+script_cai_background_done = 618
+script_cai_execute_initiative = 619
+script_cai_execute_action = 620
 
 

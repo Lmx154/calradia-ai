@@ -5,26 +5,42 @@
 //! every answer is HTTP 200 with the body `R|C|T|R`. Replies come from an
 //! OpenAI-compatible upstream (`POST {upstream}/chat/completions`), run one at a time by
 //! a single worker thread, so no `/v1` handler ever waits on the model.
+//!
+//! Protocol v2 adds `/v2/talk`: a real Warband character, the live game state, and memory
+//! of earlier conversations, kept in SQLite per campaign and savegame branch (memory.rs).
 
+mod actions;
+mod characters;
 mod http;
+mod ids;
 mod jobs;
-mod living;
+mod memory;
+mod names;
 mod npc;
+mod planner;
 mod prompt;
 mod protocol;
+mod realms;
+mod runner;
 mod sanitize;
 mod upstream;
+mod world;
 
+use characters::Registry;
 use http::{format_response, read_request, Request};
 use jobs::{Limits, Store};
+use memory::Memory;
 use npc::Npc;
 use protocol::{
-    frame, Op, CODE_BAD_REQUEST, DEFAULT_BIND, GAME_GIVE_UP_SECS, REASON_BAD_PARAM, RID_MAX,
-    UPSTREAM_CONNECT_TIMEOUT_SECS, UPSTREAM_MAX_BODY,
+    frame, frame_v2, Op, CODE_BAD_REQUEST, DEFAULT_BIND, GAME_GIVE_UP_SECS, REASON_BAD_PARAM,
+    RID_MAX, UPSTREAM_CONNECT_TIMEOUT_SECS, UPSTREAM_MAX_BODY,
 };
+use realms::Realms;
+use runner::Runner;
 use std::fmt;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, process, thread};
@@ -36,10 +52,20 @@ usage: calradia-server [options]
   --upstream URL        OpenAI-compatible base URL, http only
                         (env CALRADIA_UPSTREAM, default http://172.17.0.1:8080/v1)
   --model NAME          model name (env CALRADIA_MODEL, default calradia-qwen3.5-9b)
-  --profiles PATH      editable character JSON (default bundled data/characters.json)
-  --world PATH         vanilla ID dictionary JSON (default bundled data/world.json)
-  --memory PATH        SQLite memory file (default ./calradia-memory.sqlite3)
-  --fake-llm            skip the upstream; answer a canned reply after 1.5 s
+  --characters DIR      character profiles, one TOML file per character
+                        (env CALRADIA_CHARACTERS, default calradia-server/characters)
+  --factions DIR        kingdom lore, one TOML file per realm
+                        (env CALRADIA_FACTIONS, default calradia-server/factions)
+  --memory-db PATH      conversation memory, SQLite (env CALRADIA_MEMORY_DB, default
+                        $XDG_DATA_HOME/calradia-ai/memory.sqlite3)
+  --memory-report       print what the memory database holds, then exit
+  --log-entries FILE    how Native's event log entries read as news
+                        (env CALRADIA_LOG_ENTRIES, default calradia-server/world/log_entries.toml)
+  --no-actions          characters never propose actions (Milestone 5)
+  --no-autonomy         characters never plan or act on their own (Milestone 6)
+  --log-prompts         log every prompt sent to the model in full
+  --fake-llm            skip the upstream; answer a canned reply after 1.5 s (for
+                        /v2/talk, a summary of the character, context and memories)
   --fault MODE          misbehave on purpose on /v1/*, for testing the game:
                         hang, close, empty, wrong-rid, malformed, delay,
                         oversize-N, nonascii
@@ -114,12 +140,27 @@ struct Options {
     bind: String,
     upstream: String,
     model: String,
-    profiles: String,
-    world: String,
-    memory: String,
     fake_llm: bool,
     fault: Option<Fault>,
     limits: Limits,
+    characters: PathBuf,
+    factions: PathBuf,
+    memory_db: PathBuf,
+    memory_report: bool,
+    log_prompts: bool,
+    log_entries: PathBuf,
+    actions: bool,
+    autonomy: bool,
+}
+
+/// `$XDG_DATA_HOME/calradia-ai/memory.sqlite3`, or under `~/.local/share`.
+fn default_memory_db(env: &impl Fn(&str) -> Option<String>) -> PathBuf {
+    let set = |k: &str| env(k).filter(|v| !v.is_empty());
+    let data = set("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| set("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .unwrap_or_else(|| PathBuf::from("."));
+    data.join("calradia-ai").join("memory.sqlite3")
 }
 
 /// Parses the command line; `env` looks up environment variables. `Ok(None)` means help
@@ -137,12 +178,28 @@ fn parse_args(
         bind: DEFAULT_BIND.to_string(),
         upstream: from_env("CALRADIA_UPSTREAM", DEFAULT_UPSTREAM),
         model: from_env("CALRADIA_MODEL", DEFAULT_MODEL),
-        profiles: living::DEFAULT_PROFILES.into(),
-        world: living::DEFAULT_WORLD.into(),
-        memory: living::DEFAULT_MEMORY.into(),
         fake_llm: false,
         fault: None,
         limits: Limits::default(),
+        characters: PathBuf::from(from_env(
+            "CALRADIA_CHARACTERS",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/characters"),
+        )),
+        factions: PathBuf::from(from_env(
+            "CALRADIA_FACTIONS",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/factions"),
+        )),
+        memory_db: env("CALRADIA_MEMORY_DB")
+            .filter(|v| !v.is_empty())
+            .map_or_else(|| default_memory_db(&env), PathBuf::from),
+        memory_report: false,
+        log_prompts: false,
+        log_entries: PathBuf::from(from_env(
+            "CALRADIA_LOG_ENTRIES",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/world/log_entries.toml"),
+        )),
+        actions: true,
+        autonomy: true,
     };
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{flag} needs a value"));
@@ -154,10 +211,15 @@ fn parse_args(
             "--bind" => o.bind = value()?,
             "--upstream" => o.upstream = value()?,
             "--model" => o.model = value()?,
-            "--profiles" => o.profiles = value()?,
-            "--world" => o.world = value()?,
-            "--memory" => o.memory = value()?,
             "--fake-llm" => o.fake_llm = true,
+            "--characters" => o.characters = PathBuf::from(value()?),
+            "--factions" => o.factions = PathBuf::from(value()?),
+            "--memory-db" => o.memory_db = PathBuf::from(value()?),
+            "--memory-report" => o.memory_report = true,
+            "--log-prompts" => o.log_prompts = true,
+            "--log-entries" => o.log_entries = PathBuf::from(value()?),
+            "--no-actions" => o.actions = false,
+            "--no-autonomy" => o.autonomy = false,
             "--fault" => o.fault = Some(parse_fault(&value()?)?),
             "--max-jobs" => o.limits.max_jobs = count(value()?)? as usize,
             "--queue-len" => o.limits.queue_len = count(value()?)? as usize,
@@ -212,6 +274,31 @@ fn main() {
             process::exit(2);
         }
     };
+    let memory = Arc::new(Memory::open(&opts.memory_db));
+    if opts.memory_report {
+        match memory.report() {
+            Ok(r) => print!("memory {}:\n{r}", opts.memory_db.display()),
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        }
+        return;
+    }
+    let characters = match Registry::load(&opts.characters) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: character profiles: {e}");
+            process::exit(2);
+        }
+    };
+    let realms = match Realms::load(&opts.factions) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: kingdom lore: {e}");
+            process::exit(2);
+        }
+    };
     let backend = match backend_for(&opts) {
         Ok(b) => b,
         Err(e) => {
@@ -223,13 +310,6 @@ fn main() {
         Ok(l) => l,
         Err(e) => {
             eprintln!("error: cannot listen on {}: {e}", opts.bind);
-            process::exit(1);
-        }
-    };
-    let living = match living::Living::open(&opts.memory, &opts.profiles, &opts.world) {
-        Ok(memory) => memory,
-        Err(e) => {
-            eprintln!("error: character memory initialization failed: {e}");
             process::exit(1);
         }
     };
@@ -246,18 +326,55 @@ fn main() {
         } => format!("upstream {endpoint} model {model}"),
         Backend::Canned { kind, .. } => format!("canned replies ({kind:?}), no upstream"),
     };
+    if let Err(e) = memory.status() {
+        let bar = "!".repeat(72);
+        eprintln!(
+            "{bar}\n!!! MEMORY IS UNAVAILABLE: {e}\n!!! Every /v2/talk will fail with \
+             memory_unavailable. Fix the file or pass --memory-db.\n{bar}"
+        );
+    }
     log(format!(
         "calradia-server listening on {}; {source}; limits {:?}",
         opts.bind, opts.limits
     ));
-    if let Err(e) = start_with_living(
-        listener,
-        opts.limits,
+    log(format!(
+        "memory {}; {} character profiles from {}: {}",
+        opts.memory_db.display(),
+        characters.ids().count(),
+        opts.characters.display(),
+        characters.ids().collect::<Vec<_>>().join(", ")
+    ));
+    log(format!(
+        "{} realms from {}: {}",
+        realms.ids().count(),
+        opts.factions.display(),
+        realms.ids().collect::<Vec<_>>().join(", ")
+    ));
+    let templates = match world::LogTemplates::load(&opts.log_entries) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: log entries: {e}");
+            process::exit(2);
+        }
+    };
+    log(format!(
+        "{} log entry types from {}; actions {}; autonomy {}",
+        templates.len(),
+        opts.log_entries.display(),
+        if opts.actions { "on" } else { "off" },
+        if opts.autonomy { "on" } else { "off" }
+    ));
+    let runner = Runner {
         backend,
-        opts.fault,
-        npc::NPCS,
-        Some(living),
-    ) {
+        characters,
+        realms,
+        templates,
+        memory,
+        log_prompts: opts.log_prompts,
+        actions: opts.actions,
+        autonomy: opts.autonomy,
+    };
+    if let Err(e) = start(listener, opts.limits, runner, opts.fault, npc::NPCS) {
         eprintln!("error: {e}");
         process::exit(1);
     }
@@ -265,38 +382,27 @@ fn main() {
 
 struct App {
     store: Arc<Store>,
+    runner: Arc<Runner>,
     npcs: &'static [Npc],
     fault: Option<Fault>,
-    living: Option<living::Living>,
 }
 
 /// Starts the worker, then accepts connections forever, one thread per connection.
-#[cfg(test)]
 fn start(
     listener: TcpListener,
     limits: Limits,
-    backend: Backend,
+    runner: Runner,
     fault: Option<Fault>,
     npcs: &'static [Npc],
-) -> std::io::Result<()> {
-    start_with_living(listener, limits, backend, fault, npcs, None)
-}
-
-fn start_with_living(
-    listener: TcpListener,
-    limits: Limits,
-    backend: Backend,
-    fault: Option<Fault>,
-    npcs: &'static [Npc],
-    living: Option<living::Living>,
 ) -> std::io::Result<()> {
     let store = Arc::new(Store::new(limits));
-    jobs::spawn_worker(store.clone(), backend)?;
+    let runner = Arc::new(runner);
+    jobs::spawn_worker(store.clone(), runner.clone())?;
     let app = Arc::new(App {
         store,
+        runner,
         npcs,
         fault,
-        living,
     });
     for conn in listener.incoming() {
         match conn {
@@ -315,50 +421,50 @@ struct Outcome {
     rid: u32,
     code: u8,
     text: String,
+    /// `K|N|W|X` of a v2 frame; None for a v1 frame.
+    extra: Option<[i32; 4]>,
+}
+
+impl Outcome {
+    fn frame(&self, rid: u32) -> String {
+        match self.extra {
+            Some(extra) => frame_v2(rid, self.code, &self.text, extra),
+            None => frame(rid, self.code, &self.text),
+        }
+    }
+}
+
+/// Whether a request is answered with v2 frames: every `/v2/` route except a `/v2/talk`
+/// from a game that does not read them (no `f=2`).
+fn wants_v2(req: &Request) -> bool {
+    match req.path.as_str() {
+        protocol::ROUTE_TALK_V2 => req.param("f") == Some("2"),
+        path => path.starts_with("/v2/"),
+    }
 }
 
 impl App {
     fn respond(&self, req: &Request) -> Outcome {
-        if req.path.starts_with("/v2/") {
-            return match living::parse(req) {
-                Err(e) => Outcome {
-                    rid: e.rid,
-                    code: CODE_BAD_REQUEST,
-                    text: e.reason.into(),
-                },
-                Ok(input) => {
-                    let a = self
-                        .living
-                        .as_ref()
-                        .map(|memory| memory.respond(&input, &self.store))
-                        .unwrap_or(jobs::Answer {
-                            code: protocol::CODE_FAILED,
-                            text: "memory_unavailable".into(),
-                        });
-                    Outcome {
-                        rid: input.rid,
-                        code: a.code,
-                        text: a.text,
-                    }
-                }
-            };
-        }
-        match protocol::parse_v1(req, self.npcs) {
+        match protocol::parse(req, self.npcs) {
             Err(rejection) => Outcome {
                 rid: rejection.rid,
                 code: CODE_BAD_REQUEST,
                 text: rejection.reason.to_string(),
+                extra: wants_v2(req).then_some([0; 4]),
             },
             Ok(v1) => {
+                let v2 = wants_v2(req);
                 let answer = match v1.op {
-                    Op::Talk(talk) => self.store.talk(v1.job, talk),
+                    Op::Talk(talk) => self.store.talk(v1.job, *talk),
                     Op::Result => self.store.result(v1.job),
                     Op::Cancel => self.store.cancel(v1.job),
+                    Op::World(node) => self.runner.world(&node, &self.store),
                 };
                 Outcome {
                     rid: v1.rid,
                     code: answer.code,
                     text: answer.text,
+                    extra: answer.extra.or(v2.then_some([0; 4])),
                 }
             }
         }
@@ -379,8 +485,10 @@ fn handle(mut stream: TcpStream, app: &App) {
     };
     let started = Instant::now();
     let out = app.respond(&req);
-    let mut body = frame(out.rid, out.code, &out.text);
-    let fault = app.fault.filter(|_| req.path.starts_with("/v1/"));
+    let mut body = out.frame(out.rid);
+    let fault = app
+        .fault
+        .filter(|_| req.path.starts_with("/v1/") || req.path.starts_with("/v2/"));
     match fault {
         Some(Fault::Hang) => {
             log_request(&req, &body, started, "fault hang: holding the connection");
@@ -394,7 +502,7 @@ fn handle(mut stream: TcpStream, app: &App) {
             return log_request(&req, &body, started, "fault close: closed without reply");
         }
         Some(Fault::Empty) => body.clear(),
-        Some(Fault::WrongRid) => body = frame(out.rid % RID_MAX + 1, out.code, &out.text),
+        Some(Fault::WrongRid) => body = out.frame(out.rid % RID_MAX + 1),
         Some(Fault::Malformed) => body = "garbage|x".to_string(),
         Some(Fault::Delay) => thread::sleep(FAULT_DELAY),
         Some(Fault::Oversize(_) | Fault::NonAscii) | None => {}
@@ -420,6 +528,16 @@ fn log_request(req: &Request, body: &str, started: Instant, note: &str) {
         line += &format!(
             " npc={} day={} msg={:?}",
             param("npc"),
+            param("day"),
+            param("msg")
+        );
+    } else if req.path == protocol::ROUTE_TALK_V2 {
+        line += &format!(
+            " camp={} conv={} head={} troop={} day={} msg={:?}",
+            param("camp"),
+            param("conv"),
+            param("head"),
+            param("troop"),
             param("day"),
             param("msg")
         );

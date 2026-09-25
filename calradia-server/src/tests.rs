@@ -6,6 +6,7 @@ use crate::protocol::*;
 use crate::upstream::parse_endpoint;
 use serde_json::{json, Value};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Mutex;
 
@@ -192,16 +193,60 @@ static TEST_NPCS: [Npc; 6] = [
     test_npc(6),
 ];
 
-fn server(url: &str, limits: Limits, npcs: &'static [Npc]) -> SocketAddr {
-    let backend = Backend::Upstream {
+fn upstream_backend(url: &str) -> Backend {
+    Backend::Upstream {
         endpoint: parse_endpoint(url).unwrap(),
         model: "test-model".into(),
         connect_timeout: Duration::from_secs(2),
-    };
+    }
+}
+
+/// The shipped character profiles.
+fn shipped_characters() -> Registry {
+    Registry::load(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/characters"
+    )))
+    .unwrap()
+}
+
+/// The shipped log entry sentences.
+fn shipped_templates() -> world::LogTemplates {
+    world::LogTemplates::load(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/world/log_entries.toml"
+    )))
+    .unwrap()
+}
+
+/// The shipped kingdom lore.
+fn shipped_realms() -> Realms {
+    Realms::load(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/factions"
+    )))
+    .unwrap()
+}
+
+fn serve(runner: Runner, limits: Limits, npcs: &'static [Npc]) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
-    thread::spawn(move || start(listener, limits, backend, None, npcs));
+    thread::spawn(move || start(listener, limits, runner, None, npcs));
     addr
+}
+
+fn server(url: &str, limits: Limits, npcs: &'static [Npc]) -> SocketAddr {
+    let runner = Runner {
+        backend: upstream_backend(url),
+        characters: shipped_characters(),
+        realms: shipped_realms(),
+        templates: shipped_templates(),
+        actions: true,
+        autonomy: true,
+        memory: Arc::new(Memory::in_memory()),
+        log_prompts: false,
+    };
+    serve(runner, limits, npcs)
 }
 
 fn server_for(f: &Fake) -> SocketAddr {
@@ -379,6 +424,7 @@ fn success_round_trip_and_upstream_request_shape() {
     assert_eq!(body["model"], "test-model");
     assert_eq!(body["max_tokens"], 220);
     assert_eq!(body["temperature"], 0.8);
+    assert!(body.get("response_format").is_none());
     assert_eq!(
         body["chat_template_kwargs"],
         json!({"enable_thinking": false})
@@ -1031,4 +1077,1262 @@ fn parses_args() {
     assert!(a(&["--help"]).unwrap().is_none());
     let https = a(&["--upstream", "https://h/v1"]).unwrap().unwrap();
     assert!(backend_for(&https).is_err());
+}
+
+// ---------------------------------------------------------------- protocol v2: characters and memory
+
+use crate::ids::ids;
+use crate::memory::MAX_CHAIN;
+use crate::prompt::MAX_PROMPT_CHARS;
+
+/// A `/v2/talk`, with the values a new Swadian campaign might send to Borcha.
+#[derive(Clone)]
+struct V2 {
+    camp: u32,
+    conv: u32,
+    head: u32,
+    troop: &'static str,
+    day: u32,
+    fac: &'static str,
+    pfac: &'static str,
+    frel: i32,
+    rel: i32,
+    rep: u32,
+    occ: u32,
+    st: u32,
+    ren: i32,
+    hon: i32,
+    loc: &'static str,
+    ldist: u32,
+    pg: u32,
+    pname: &'static str,
+    nname: &'static str,
+    fname: &'static str,
+    pfname: &'static str,
+    lname: &'static str,
+    /// Sent only when set, as by the current mod; None mimics an older build.
+    wars: Option<u32>,
+    ruler: &'static str,
+    spouse: &'static str,
+    father: &'static str,
+    msg: String,
+}
+
+fn borcha(msg: &str) -> V2 {
+    V2 {
+        camp: 7,
+        conv: 100,
+        head: 0,
+        troop: "trp_npc1",
+        day: 12,
+        fac: "fac_commoners",
+        pfac: "fac_no_faction",
+        frel: 0,
+        rel: 4,
+        rep: 8,
+        occ: 5,
+        st: ST_IN_PARTY,
+        ren: 60,
+        hon: -3,
+        loc: "p_town_6",
+        ldist: 5,
+        pg: 1,
+        pname: "Ylva",
+        nname: "Borcha",
+        fname: "Commoners",
+        pfname: "",
+        lname: "Praven",
+        wars: Some(0),
+        ruler: "",
+        spouse: "",
+        father: "",
+        msg: msg.to_string(),
+    }
+}
+
+fn harlaus(msg: &str) -> V2 {
+    V2 {
+        troop: "trp_kingdom_1_lord",
+        nname: "King Harlaus",
+        fac: "fac_kingdom_1",
+        fname: "Kingdom of Swadia",
+        rep: 0,
+        occ: 2,
+        st: ST_FACTION_LEADER,
+        rel: -15,
+        frel: -30,
+        ldist: 0,
+        // Bits: fac_kingdom_2 and fac_kingdom_3 (supporters faction is bit 0).
+        wars: Some(1 << 2 | 1 << 3),
+        spouse: "Lady Esmerelda",
+        ..borcha(msg)
+    }
+}
+
+fn v2_url(rid: u32, job: u32, v: &V2) -> String {
+    let ids = ids();
+    format!(
+        "/v2/talk?v=2&rid={rid}&job={job}&camp={}&conv={}&head={}&troop={}&day={}&fac={}\
+         &pfac={}&frel={}&rel={}&rep={}&occ={}&st={}&ren={}&hon={}&loc={}&ldist={}&pg={}\
+         {}&pname={}&nname={}&fname={}&pfname={}&lname={}{}&msg={}&end=1",
+        v.camp,
+        v.conv,
+        v.head,
+        ids.troops.index(v.troop).unwrap(),
+        v.day,
+        ids.factions.index(v.fac).unwrap(),
+        ids.factions.index(v.pfac).unwrap(),
+        enc(&v.frel.to_string()),
+        enc(&v.rel.to_string()),
+        v.rep,
+        v.occ,
+        v.st,
+        enc(&v.ren.to_string()),
+        enc(&v.hon.to_string()),
+        ids.parties.index(v.loc).unwrap(),
+        v.ldist,
+        v.pg,
+        v.wars.map_or(String::new(), |w| format!("&wars={w}")),
+        enc(v.pname),
+        enc(v.nname),
+        enc(v.fname),
+        enc(v.pfname),
+        enc(v.lname),
+        if v.wars.is_some() {
+            format!(
+                "&ruler={}&spouse={}&father={}",
+                enc(v.ruler),
+                enc(v.spouse),
+                enc(v.father)
+            )
+        } else {
+            String::new()
+        },
+        enc(&v.msg)
+    )
+}
+
+fn talk_v2(addr: SocketAddr, job: u32, v: &V2) -> Frame {
+    let rid = job + 2000;
+    let f = parse_frame(&get(addr, &v2_url(rid, job, v)));
+    assert_eq!(f.rid, rid);
+    f
+}
+
+/// Talks, waits and returns the outcome.
+fn say(addr: SocketAddr, job: u32, v: &V2) -> Frame {
+    let f = talk_v2(addr, job, v);
+    assert!(f.code == CODE_PENDING || f.code == CODE_READY, "{f:?}");
+    wait_done(addr, job)
+}
+
+/// A server with the shipped profiles and the given memory; returns the memory too.
+fn memory_server(url: &str, memory: Arc<Memory>) -> SocketAddr {
+    let runner = Runner {
+        backend: upstream_backend(url),
+        characters: shipped_characters(),
+        realms: shipped_realms(),
+        templates: shipped_templates(),
+        actions: true,
+        autonomy: true,
+        memory,
+        log_prompts: false,
+    };
+    serve(runner, limits(), npc::NPCS)
+}
+
+fn temp_db(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("calradia-it-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir.join("memory.sqlite3")
+}
+
+impl Fake {
+    fn messages(&self, i: usize) -> Vec<(String, String)> {
+        self.request(i).1["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| {
+                (
+                    m["role"].as_str().unwrap().to_string(),
+                    m["content"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    }
+}
+
+fn contains_all(text: &str, parts: &[&str]) {
+    for part in parts {
+        assert!(text.contains(part), "{part:?} missing from:\n{text}");
+    }
+}
+
+#[test]
+fn v2_identifies_the_character_and_states_the_live_context() {
+    let up = fake(vec![Up::Reply("Heh. Evening, boss.")]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = memory_server(&up.url, memory.clone());
+    assert_eq!(
+        say(addr, 1, &borcha("Hello, Borcha.")),
+        fr(77, CODE_READY, "Heh. Evening, boss.")
+    );
+    let messages = up.messages(0);
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[1], ("user".into(), "Hello, Borcha.".into()));
+    contains_all(
+        &messages[0].1,
+        &[
+            "You are Borcha.\nBackground: Born in the high steppe near the village of Dashbigha",
+            "Speaking style: Calls the player 'boss'",
+            "It is day 12 of the campaign.",
+            "You and Ylva are near Praven, a town.",
+            "You ride in Ylva's company.",
+            "Ylva is a woman. Renown 60 (somewhat known), honour -3 (thought a little untrustworthy).",
+            "Ylva has sworn allegiance to no kingdom.",
+            "relation with Ylva is 4 on a scale from -100 to 100: you are on good terms.",
+            "you remember no earlier conversation with Ylva",
+            "Speak only as Borcha",
+            "you need not agree with, like, trust or help Ylva",
+        ],
+    );
+    // A commoner companion has no realm to speak of; a king does.
+    assert!(!messages[0].1.contains("You belong to"));
+    // The turn is stored under the game's ids, not yet delivered.
+    assert!(memory.find(7, 1).unwrap().is_some());
+    assert!(memory
+        .report()
+        .unwrap()
+        .contains("1 turns (0 delivered), characters trp_npc1"));
+}
+
+#[test]
+fn different_characters_get_different_profiles_and_faction_context() {
+    let up = fake(vec![Up::Reply("Speak.")]);
+    let addr = memory_server(&up.url, Arc::new(Memory::in_memory()));
+    say(addr, 1, &borcha("Who are you?"));
+    say(
+        addr,
+        2,
+        &V2 {
+            conv: 101,
+            ..harlaus("Who are you?")
+        },
+    );
+    let (b, h) = (up.messages(0)[0].1.clone(), up.messages(1)[0].1.clone());
+    contains_all(
+        &h,
+        &[
+            "You are King Harlaus.",
+            "cousin of the late King Esterich",
+            "You belong to Kingdom of Swadia, and you are its ruler.",
+            "You and Ylva are at Praven, a town.",
+            "relation with Ylva is -15 on a scale from -100 to 100: you dislike them.",
+            "Your realm is hostile to Ylva and their side (relation -30).",
+            "Your realm is at war with Kingdom of Vaegirs and Khergit Khanate.",
+            "You are married to Lady Esmerelda.",
+            "What you know as one of the Swadian (Kingdom of Swadia):\nLand:",
+        ],
+    );
+    assert!(!h.contains("Borcha") && !b.contains("Harlaus"));
+    assert!(!h.contains("You ride in"));
+    // The part before the shared situation differs entirely.
+    let profile = |s: &str| s.split("\n\nSetting:").next().unwrap().to_string();
+    assert_ne!(profile(&b), profile(&h));
+}
+
+#[test]
+fn missing_profiles_fall_back_to_live_data() {
+    let up = fake(vec![Up::Reply("Hmph.")]);
+    let addr = memory_server(&up.url, Arc::new(Memory::in_memory()));
+    let lord = V2 {
+        troop: "trp_knight_1_3",
+        nname: "Count Plais",
+        fac: "fac_kingdom_1",
+        fname: "Kingdom of Swadia",
+        rep: 4,
+        occ: 2,
+        st: 0,
+        ruler: "King Harlaus",
+        father: "Count Ancestor",
+        ..borcha("Good day, my lord.")
+    };
+    assert_eq!(say(addr, 1, &lord).code, CODE_READY);
+    let system = up.messages(0)[0].1.clone();
+    contains_all(&system, &[
+        "You are Count Plais, a lord of Calradia.\nPersonality: cunning: cold-blooded, pragmatic and amoral.",
+        "No personal history has been written for you",
+        // The realm's lore stands in for a personal history.
+        "What you know as one of the Swadian (Kingdom of Swadia):\nLand:",
+        "You belong to Kingdom of Swadia.\n- Your liege is King Harlaus.",
+        "Your father: Count Ancestor.",
+        "Your realm is at war with no other realm.",
+    ]);
+    // An older mod build sends none of the optional fields: nothing about them is stated.
+    let old = V2 {
+        wars: None,
+        ..lord.clone()
+    };
+    assert!(!v2_url(1, 2, &old).contains("wars="));
+    assert_eq!(say(addr, 2, &V2 { conv: 101, ..old }).code, CODE_READY);
+    let system = up.messages(1)[0].1.clone();
+    assert!(
+        !system.contains("liege") && !system.contains("Your realm is at war with"),
+        "{system}"
+    );
+    assert!(system.contains("Kingdom of Swadia):\nLand:"));
+}
+
+#[test]
+fn memory_follows_turns_conversations_and_server_restarts() {
+    let up = fake(vec![Up::Reply("I will not forget it, boss.")]);
+    let db = temp_db("restart");
+    let first = memory_server(&up.url, Arc::new(Memory::open(&db)));
+    // Conversation 100: two turns; the second names the first as its head.
+    say(
+        first,
+        11,
+        &borcha("My sister Ylfa keeps an inn in Sargoth."),
+    );
+    say(
+        first,
+        12,
+        &V2 {
+            head: 11,
+            ..borcha("Her ale is the best in Calradia.")
+        },
+    );
+    let m = up.messages(1);
+    assert_eq!(m.len(), 4, "{m:?}");
+    assert_eq!(m[1].1, "My sister Ylfa keeps an inn in Sargoth.");
+    assert_eq!(
+        m[2],
+        ("assistant".into(), "I will not forget it, boss.".into())
+    );
+    // Conversation 101, later: the earlier conversation is a memory now.
+    say(
+        first,
+        13,
+        &V2 {
+            conv: 101,
+            head: 12,
+            day: 15,
+            ..borcha("Good morning.")
+        },
+    );
+    let m = up.messages(2);
+    assert_eq!(m.len(), 2);
+    contains_all(&m[0].1, &[
+        "You first spoke with Ylva on day 12; you have talked 2 times before this conversation.",
+        "Your most recent earlier conversations:\n- Day 12: Ylva said \"My sister Ylfa keeps an inn in Sargoth.\" and you answered \"I will not forget it, boss.\"",
+    ]);
+
+    // Restart: a new server on the same database remembers, after many other turns.
+    let second = memory_server(&up.url, Arc::new(Memory::open(&db)));
+    let mut head = 13;
+    for job in 14..24 {
+        say(
+            second,
+            job,
+            &V2 {
+                conv: 102,
+                head,
+                day: 20,
+                ..borcha(&format!("Filler {job}."))
+            },
+        );
+        head = job;
+    }
+    say(
+        second,
+        30,
+        &V2 {
+            conv: 103,
+            head,
+            day: 25,
+            ..borcha("Do you remember my sister?")
+        },
+    );
+    let system = &up.messages(up.hits() - 1)[0].1;
+    contains_all(system, &[
+        "have talked 13 times before",
+        "Older words that bear on what is being said now:\n- Day 12: Ylva said \"My sister Ylfa keeps an inn in Sargoth.\"",
+    ]);
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+#[test]
+fn savegame_branches_and_campaigns_are_isolated() {
+    let up = fake(vec![Up::Reply("Aye.")]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = memory_server(&up.url, memory.clone());
+    say(addr, 1, &borcha("I buried the gold under the old oak."));
+    say(
+        addr,
+        2,
+        &V2 {
+            conv: 101,
+            head: 1,
+            ..borcha("I moved the gold to the chapel.")
+        },
+    );
+    // The player reloads the save made after job 1: its head is 1, so job 2 never happened.
+    say(
+        addr,
+        3,
+        &V2 {
+            conv: 102,
+            head: 1,
+            ..borcha("Where is the gold?")
+        },
+    );
+    let branch = &up.messages(2)[0].1;
+    contains_all(branch, &["old oak", "talked 1 times"]);
+    assert!(!branch.contains("chapel"), "{branch}");
+    // A new campaign: nothing, even with a head that names a turn of another campaign.
+    // (Its own job ids are separate in the database; memory.rs tests reuse across campaigns.)
+    say(
+        addr,
+        6,
+        &V2 {
+            camp: 8,
+            ..borcha("Where is the gold?")
+        },
+    );
+    say(
+        addr,
+        4,
+        &V2 {
+            camp: 8,
+            head: 2,
+            conv: 5,
+            ..borcha("Where is the gold?")
+        },
+    );
+    for i in [3, 4] {
+        let system = &up.messages(i)[0].1;
+        assert!(
+            system.contains("you remember no earlier conversation"),
+            "{system}"
+        );
+        assert!(!system.contains("oak") && !system.contains("chapel"));
+    }
+    // Another character in the same campaign does not share Borcha's memories.
+    say(
+        addr,
+        5,
+        &V2 {
+            conv: 103,
+            head: 2,
+            ..harlaus("Where is the gold?")
+        },
+    );
+    assert!(up.messages(5)[0]
+        .1
+        .contains("you remember no earlier conversation"));
+    // Heads that the game named are delivered; job 2 was named by job 5 (Harlaus).
+    let report = memory.report().unwrap();
+    assert!(
+        report.contains(
+            "campaign 7 (player \"Ylva\", from day 12): 4 conversations, 4 turns (2 delivered)"
+        ),
+        "{report}"
+    );
+}
+
+#[test]
+fn canceled_and_undelivered_replies_are_not_remembered() {
+    let up = fake(vec![
+        Up::Hang,
+        Up::Reply("A secret reply."),
+        Up::Reply("Fine."),
+    ]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = memory_server(&up.url, memory.clone());
+    // Canceled while the model runs: nothing is stored.
+    talk_v2(addr, 1, &borcha("First words."));
+    wait_until("job 1 running", || up.hits() == 1);
+    assert_eq!(cancel(addr, 1).code, CODE_CANCELED);
+    assert_eq!(memory.find(7, 1).unwrap(), None);
+    // READY but never shown (the player canceled before the poll, or closed the window):
+    // stored, but the game never makes it its head, so the next talk does not recall it.
+    assert_eq!(say(addr, 2, &borcha("Second words.")).code, CODE_READY);
+    assert!(memory.find(7, 2).unwrap().is_some());
+    say(
+        addr,
+        3,
+        &V2 {
+            conv: 101,
+            head: 0,
+            ..borcha("Third words.")
+        },
+    );
+    let system = &up.messages(2)[0].1;
+    assert!(
+        system.contains("you remember no earlier conversation"),
+        "{system}"
+    );
+    assert!(!system.contains("secret"));
+    assert!(memory.report().unwrap().contains("(0 delivered)"));
+}
+
+#[test]
+fn duplicate_v2_talks_run_once_even_across_restarts() {
+    let up = fake(vec![Up::Slow(300, "Once only.")]);
+    let db = temp_db("dup");
+    let first = memory_server(&up.url, Arc::new(Memory::open(&db)));
+    let v = borcha("Hello.");
+    assert_eq!(talk_v2(first, 5, &v), fr(2005, CODE_PENDING, "pending"));
+    assert_eq!(talk_v2(first, 5, &v), fr(2005, CODE_PENDING, "pending"));
+    assert_eq!(wait_done(first, 5), fr(77, CODE_READY, "Once only."));
+    assert_eq!(
+        talk_v2(
+            first,
+            5,
+            &V2 {
+                msg: "Other.".into(),
+                ..v.clone()
+            }
+        )
+        .code,
+        CODE_BAD_REQUEST
+    );
+    assert_eq!(up.hits(), 1);
+    // After a restart the job is unknown to /v1/result, but the same talk is answered
+    // from memory without a new generation or a second record.
+    let second = memory_server(&up.url, Arc::new(Memory::open(&db)));
+    assert_eq!(result(second, 5).code, CODE_UNKNOWN_JOB);
+    assert_eq!(say(second, 5, &v), fr(77, CODE_READY, "Once only."));
+    assert_eq!(up.hits(), 1);
+    // The same ids with a different talk conflict: at once while the job is in memory, and
+    // after the job has expired (here: a third server) when the worker finds the turn.
+    let other = V2 {
+        msg: "Something else.".into(),
+        ..v.clone()
+    };
+    assert_eq!(
+        talk_v2(second, 5, &other),
+        fr(2005, CODE_BAD_REQUEST, "conflict")
+    );
+    let third = memory_server(&up.url, Arc::new(Memory::open(&db)));
+    assert_eq!(say(third, 5, &other), fr(77, CODE_FAILED, "conflict"));
+    assert_eq!(up.hits(), 1);
+    let memory = Memory::open(&db);
+    assert!(memory.report().unwrap().contains("1 turns"));
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+#[test]
+fn unavailable_memory_fails_v2_talks_but_not_v1() {
+    let up = fake(vec![Up::Reply("Fine.")]);
+    let db = temp_db("corrupt");
+    std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+    std::fs::write(&db, vec![0x42; 4096]).unwrap();
+    let addr = memory_server(&up.url, Arc::new(Memory::open(&db)));
+    assert_eq!(
+        say(addr, 1, &borcha("Hello.")),
+        fr(77, CODE_FAILED, "memory_unavailable")
+    );
+    assert_eq!(up.hits(), 0);
+    assert_eq!(
+        talk_and_wait(addr, 2, "Hello, Hrodvar."),
+        fr(77, CODE_READY, "Fine.")
+    );
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+#[test]
+fn model_failures_store_nothing() {
+    let memory = Arc::new(Memory::in_memory());
+    let addr = memory_server(&refused_url(), memory.clone());
+    assert_eq!(
+        say(addr, 1, &borcha("Hello.")),
+        fr(77, CODE_FAILED, "upstream_unavailable")
+    );
+    let up = fake(vec![
+        Up::Reply("<think>only thoughts</think>"),
+        Up::Status(500),
+    ]);
+    let addr = memory_server(&up.url, memory.clone());
+    assert_eq!(
+        say(addr, 2, &borcha("Hello.")),
+        fr(77, CODE_FAILED, "empty_reply")
+    );
+    assert_eq!(
+        say(addr, 3, &borcha("Hello.")),
+        fr(77, CODE_FAILED, "upstream_error")
+    );
+    for job in 1..=3 {
+        assert_eq!(memory.find(7, job).unwrap(), None);
+    }
+    assert!(memory.report().unwrap().contains("no campaigns"));
+}
+
+#[test]
+fn oversized_context_is_bounded() {
+    let long = |i: usize| format!("{i} {}", "x".repeat(290));
+    let up = fake(vec![Up::ReplyOwned("y ".repeat(250))]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = memory_server(&up.url, memory.clone());
+    // 30 long turns in one conversation and 30 in earlier ones, all on one chain.
+    let mut head = 0;
+    for job in 1..=60u32 {
+        let conv = if job > 30 { 200 } else { 100 + job };
+        say(
+            addr,
+            job,
+            &V2 {
+                conv,
+                head,
+                ..borcha(&long(job as usize))
+            },
+        );
+        head = job;
+    }
+    let messages = up.messages(59);
+    let total: usize = messages.iter().map(|(_, c)| c.len()).sum();
+    assert!(total <= MAX_PROMPT_CHARS, "{total}");
+    assert_eq!(messages.last().unwrap().1, long(60));
+    // The conversation in progress comes first; its latest turns are kept.
+    assert!(messages.iter().any(|(r, c)| r == "user" && *c == long(59)));
+    assert!(MAX_CHAIN as usize > 60);
+}
+
+#[test]
+fn v2_request_validation_and_v1_compatibility() {
+    let up = fake(vec![Up::Reply("Fine.")]);
+    let addr = memory_server(&up.url, Arc::new(Memory::in_memory()));
+    let ask = |target: &str| parse_frame(&get(addr, target));
+    let bad = |reason: &str| fr(9, CODE_BAD_REQUEST, reason);
+    let url = |v: &V2| v2_url(9, 9, v);
+    let base = url(&borcha("Hi"));
+    // Each talk version needs its own v=.
+    assert_eq!(ask(&base.replace("v=2&", "v=1&")), bad("bad_version"));
+    assert_eq!(
+        ask(&talk_url(9, 9, 1, 1, "A", "Hi").replace("v=1&", "v=2&")),
+        bad("bad_version")
+    );
+    assert_eq!(ask(&base.replace("&end=1", "")), bad("truncated"));
+    let ids = ids();
+    let troop = |t: &str| format!("troop={}&", ids.troops.index(t).unwrap());
+    let swap = |from: String, to: String| ask(&base.replacen(&from, &to, 1));
+    let npc1 = troop("trp_npc1");
+    for (from, to) in [
+        (npc1.clone(), "troop=0&".to_string()),     // the player
+        (npc1.clone(), troop("trp_temp_troop")),    // not a character
+        (npc1.clone(), "troop=99999&".to_string()), // no such troop
+        ("camp=7&".into(), "camp=0&".into()),
+        ("conv=100&".into(), "conv=x&".into()),
+        ("head=0&".into(), "head=%2D1&".into()),
+        ("rel=4&".into(), "rel=9999999&".into()),
+        ("pg=1&".into(), "pg=2&".into()),
+        ("day=12&".into(), "day=100001&".into()),
+        ("fac=1&".into(), "fac=999&".into()),
+        ("st=1&".into(), "".into()),
+        ("&wars=0&".into(), "&wars=128&".into()),
+        ("&wars=0&".into(), "&wars=x&".into()),
+    ] {
+        assert_eq!(
+            swap(from.clone(), to.clone()),
+            bad("bad_param"),
+            "{from} -> {to}"
+        );
+    }
+    assert_eq!(ask(&url(&borcha(&"a".repeat(301)))), bad("too_long"));
+    // The largest talk the mod can send fits in MAX_TARGET: every name and the message at
+    // their caps, all in characters the engine percent-encodes, and 9-digit ids.
+    let wide = |n: usize| -> &'static str { Box::leak(",".repeat(n).into_boxed_str()) };
+    let widest = V2 {
+        camp: RID_MAX,
+        conv: RID_MAX,
+        head: RID_MAX,
+        pname: wide(MAX_PNAME),
+        nname: wide(MAX_NAME),
+        fname: wide(MAX_NAME),
+        pfname: wide(MAX_NAME),
+        lname: wide(MAX_NAME),
+        ruler: wide(MAX_NAME),
+        spouse: wide(MAX_NAME),
+        father: wide(MAX_NAME),
+        ..borcha(&"?".repeat(MAX_MSG))
+    };
+    let target = v2_url(RID_MAX, RID_MAX, &widest);
+    assert!(target.len() < MAX_TARGET, "{}", target.len());
+    assert_eq!(ask(&url(&borcha(" "))), bad("empty_msg"));
+    assert_eq!(up.hits(), 0);
+    // Negative values arrive percent-encoded, as the engine sends them; long names are cut.
+    let v = V2 {
+        rel: -100,
+        hon: -45,
+        nname: "Borcha the Unreasonably Long-Named Tracker of the Steppe",
+        ..borcha("Hi")
+    };
+    assert!(url(&v).contains("&rel=%2D100&"));
+    assert_eq!(say(addr, 9, &v).code, CODE_READY);
+    contains_all(
+        &up.messages(0)[0].1,
+        &[
+            "is -100 on a scale",
+            "honour -45 (known to be dishonourable)",
+            "Speak only as Borcha the Unreasonably Long-Named Track, ",
+        ],
+    );
+    // v1 talks work as before, next to v2.
+    assert_eq!(
+        talk_and_wait(addr, 10, "Hello"),
+        fr(77, CODE_READY, "Fine.")
+    );
+    assert!(up.system_prompt(1).starts_with("You are Hrodvar"));
+}
+
+#[test]
+fn fake_llm_summarizes_what_the_prompt_contains() {
+    let runner = Runner {
+        backend: Backend::Canned {
+            delay: Duration::from_millis(10),
+            kind: Canned::Reply,
+        },
+        characters: shipped_characters(),
+        realms: shipped_realms(),
+        templates: shipped_templates(),
+        actions: true,
+        autonomy: true,
+        memory: Arc::new(Memory::in_memory()),
+        log_prompts: true,
+    };
+    let addr = serve(runner, limits(), npc::NPCS);
+    let f = say(addr, 1, &borcha("My horse is called Swiftfoot."));
+    assert_eq!(
+        f.text,
+        "[fake] I am Borcha of Commoners, day 12, relation 4. I remember 0 earlier talks."
+    );
+    let f = say(
+        addr,
+        2,
+        &V2 {
+            conv: 101,
+            head: 1,
+            ..harlaus("My horse is called Swiftfoot.")
+        },
+    );
+    assert!(
+        f.text
+            .starts_with("[fake] I am King Harlaus of Kingdom of Swadia"),
+        "{f:?}"
+    );
+    let f = say(
+        addr,
+        3,
+        &V2 {
+            conv: 102,
+            head: 2,
+            ..borcha("Is Swiftfoot well?")
+        },
+    );
+    assert_eq!(
+        f.text,
+        "[fake] I am Borcha of Commoners, day 12, relation 4. I remember 1 earlier talks; \
+         you last said: My horse is called Swiftfoot.."
+    );
+    // v1 keeps its canned in-character replies.
+    assert_eq!(talk(addr, 4, "Hi").code, CODE_PENDING);
+    assert!(!wait_done(addr, 4).text.starts_with("[fake]"));
+}
+
+// ---------------------------------------------------------------- Milestones 4-6
+
+use crate::memory::Plan;
+use crate::protocol::{LogEntry, Snapshot};
+
+/// Parses a v2 body `R|C|T|K|N|W|X|R`, asserting the frame's guarantees.
+fn parse_frame2(body: &str) -> (Frame, [i32; 4]) {
+    assert!(body.len() <= 580, "frame of {} bytes", body.len());
+    let parts: Vec<&str> = body.split('|').collect();
+    assert_eq!(parts.len(), 8, "{body:?}");
+    assert_eq!(parts[0], parts[7], "{body:?}");
+    let extra = [3, 4, 5, 6].map(|i| parts[i].parse::<i32>().expect("integer"));
+    let v1 = format!("{}|{}|{}|{}", parts[0], parts[1], parts[2], parts[7]);
+    (parse_frame(&v1), extra)
+}
+
+fn list(values: &[u32]) -> String {
+    values.iter().map(|v| format!(".{v}")).collect()
+}
+
+fn event_url(rid: u32, node: u32, whead: u32, day: u32, e: &LogEntry) -> String {
+    format!(
+        "/v2/event?v=2&rid={rid}&job={node}&camp=7&whead={whead}&day={day}&idx={}&type={}\
+         &time={}&actor={}&center={}&clord={}&cfac={}&troop={}&tfac={}&fac={}&pname=Ylva&pfname=&end=1",
+        e.index,
+        e.kind,
+        e.hours,
+        enc(&e.actor.to_string()),
+        enc(&e.center.to_string()),
+        enc(&e.center_lord.to_string()),
+        enc(&e.center_faction.to_string()),
+        enc(&e.troop.to_string()),
+        enc(&e.troop_faction.to_string()),
+        enc(&e.faction.to_string()),
+    )
+}
+
+fn world_url(rid: u32, node: u32, whead: u32, day: u32, s: &Snapshot) -> String {
+    let half = s.lords.len() / 2;
+    format!(
+        "/v2/world?v=2&rid={rid}&job={node}&camp=7&whead={whead}&day={day}&alive={}&pname=Ylva\
+         &pfname=&wars={}&owners={}&lords={}&lords2={}&end=1",
+        s.alive,
+        enc(&list(&s.wars)),
+        enc(&list(&s.owners)),
+        enc(&list(&s.lords[..half])),
+        enc(&list(&s.lords[half..])),
+    )
+}
+
+fn tick_url(rid: u32, node: u32, whead: u32, day: u32, head: u32) -> String {
+    format!(
+        "/v2/tick?v=2&rid={rid}&job={node}&camp=7&whead={whead}&day={day}&head={head}\
+         &pname=Ylva&pfname=&end=1"
+    )
+}
+
+fn send2(addr: SocketAddr, target: &str) -> (Frame, [i32; 4]) {
+    parse_frame2(&get(addr, target))
+}
+
+/// `wait_done` for a job whose results come in v2 frames (`f=2`).
+fn wait_done2(addr: SocketAddr, job: u32) -> (Frame, [i32; 4]) {
+    let start = Instant::now();
+    loop {
+        let (f, extra) = send2(addr, &format!("/v1/result?v=1&rid=77&job={job}&end=1"));
+        if f.code != CODE_PENDING {
+            return (f, extra);
+        }
+        assert!(start.elapsed() < Duration::from_secs(8), "job {job} stuck");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn fac(id: &str) -> i32 {
+    ids().factions.index(id).unwrap() as i32
+}
+
+fn troop(id: &str) -> i32 {
+    ids().troops.index(id).unwrap() as i32
+}
+
+/// Ylva (the player) defeated Count Klargus of Swadia on day 3.
+fn defeat() -> LogEntry {
+    LogEntry {
+        index: 1,
+        kind: 11,
+        hours: 3 * 24 + 2,
+        actor: 0,
+        center: -1,
+        center_lord: -1,
+        center_faction: -1,
+        troop: troop("trp_knight_1_1"),
+        troop_faction: fac("fac_kingdom_1"),
+        faction: -1,
+    }
+}
+
+fn baseline() -> Snapshot {
+    let (realms, centers, lords) = protocol::snapshot_shape();
+    let swadia = fac("fac_kingdom_1") as u32;
+    Snapshot {
+        alive: 0b111_1110,
+        wars: vec![0; realms * (realms - 1) / 2],
+        owners: vec![swadia; centers],
+        lords: vec![swadia * 2; lords],
+    }
+}
+
+fn server_with(url: &str, memory: Arc<Memory>, actions: bool, autonomy: bool) -> SocketAddr {
+    let runner = Runner {
+        backend: upstream_backend(url),
+        characters: shipped_characters(),
+        realms: shipped_realms(),
+        templates: shipped_templates(),
+        memory,
+        log_prompts: false,
+        actions,
+        autonomy,
+    };
+    serve(runner, limits(), npc::NPCS)
+}
+
+fn stored() -> Frame {
+    fr(3001, CODE_READY, "stored")
+}
+
+#[test]
+fn world_events_are_chained_per_save_and_recalled_in_talks() {
+    let up = fake(vec![Up::Reply("I remember.")]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = server_with(&up.url, memory.clone(), true, false);
+    // Node 11: the log entry. Node 12: a first snapshot (a baseline, no events). Node 13:
+    // the next day's snapshot, in which Sargoth fell to the Vaegirs.
+    assert_eq!(
+        send2(addr, &event_url(3001, 11, 0, 3, &defeat())),
+        (stored(), [0; 4])
+    );
+    assert_eq!(
+        send2(addr, &world_url(3001, 12, 11, 3, &baseline())).0,
+        stored()
+    );
+    let mut next = baseline();
+    next.owners[0] = fac("fac_kingdom_2") as u32;
+    assert_eq!(send2(addr, &world_url(3001, 13, 12, 4, &next)).0, stored());
+    // A lord of Swadia, talked to with the world head 13, knows both.
+    let lord = V2 {
+        troop: "trp_knight_1_1",
+        nname: "Count Klargus",
+        fac: "fac_kingdom_1",
+        fname: "Kingdom of Swadia",
+        occ: 2,
+        st: 0,
+        ..borcha("Do you know me?")
+    };
+    let url = |v: &V2, whead: u32| {
+        v2_url(2001, 1, v).replace("&pname=", &format!("&whead={whead}&pname="))
+    };
+    let f = parse_frame(&get(addr, &url(&lord, 13)));
+    assert_eq!(f.code, CODE_PENDING);
+    wait_done(addr, 1);
+    contains_all(&up.messages(0)[0].1, &[
+        "Events in Calradia that you know of (from the game's record; these happened):",
+        "- Day 3: Ylva defeated Count Klargus in battle.",
+        "- Day 4: The town of Sargoth passed from the Kingdom of Swadia to the Kingdom of Vaegirs.",
+    ]);
+    // Another save that reloaded before node 13 only knows the defeat.
+    get(
+        addr,
+        &url(
+            &V2 {
+                conv: 101,
+                ..lord.clone()
+            },
+            12,
+        )
+        .replace("job=1&", "job=2&"),
+    );
+    wait_done(addr, 2);
+    let system = up.messages(1)[0].1.clone();
+    assert!(
+        system.contains("defeated Count Klargus") && !system.contains("Sargoth passed"),
+        "{system}"
+    );
+    // Retrying a node is harmless; reusing its id for something else is a conflict.
+    assert_eq!(
+        send2(addr, &event_url(3001, 11, 0, 3, &defeat())).0,
+        stored()
+    );
+    let other = LogEntry {
+        index: 2,
+        ..defeat()
+    };
+    assert_eq!(
+        send2(addr, &event_url(3001, 11, 0, 3, &other)).0,
+        fr(3001, CODE_BAD_REQUEST, "conflict")
+    );
+    assert!(
+        memory.report().unwrap().contains("world 3 nodes, 2 events"),
+        "{}",
+        memory.report().unwrap()
+    );
+}
+
+#[test]
+fn world_nodes_are_validated() {
+    let up = fake(vec![Up::Reply("x")]);
+    let addr = server_with(&up.url, Arc::new(Memory::in_memory()), true, true);
+    let bad = |target: String| {
+        let (f, extra) = send2(addr, &target);
+        assert_eq!((f.code, extra), (CODE_BAD_REQUEST, [0; 4]), "{target}");
+    };
+    let good = world_url(3001, 12, 0, 3, &baseline());
+    bad(good.replace("v=2", "v=1"));
+    bad(good.replace("&owners=%2E15", "&owners=%2E99999999999"));
+    bad(good.replace("&lords2=", "&lords3="));
+    let mut short = baseline();
+    short.owners.pop();
+    bad(world_url(3001, 12, 0, 3, &short));
+    let mut wars = baseline();
+    wars.wars[0] = 2;
+    bad(world_url(3001, 12, 0, 3, &wars));
+    bad(event_url(
+        3001,
+        11,
+        0,
+        3,
+        &LogEntry {
+            index: 0,
+            ..defeat()
+        },
+    ));
+    bad(event_url(
+        3001,
+        11,
+        0,
+        3,
+        &LogEntry {
+            actor: -2,
+            ..defeat()
+        },
+    ));
+    bad(tick_url(3001, 11, 0, 3, 0).replace("&head=0", ""));
+    bad(tick_url(3001, 11, 0, 3, 0).replace("camp=7", "camp=0"));
+    // A v1 route never answers with a v2 frame.
+    assert_eq!(
+        parse_frame(&get(addr, "/v1/result?v=1&rid=5&job=6&end=1")).code,
+        CODE_UNKNOWN_JOB
+    );
+}
+
+#[test]
+fn actions_are_validated_delivered_and_remembered() {
+    let up = fake(vec![
+        Up::Reply("Take this purse, and my thanks.\nACTION: give 100"),
+        Up::Reply("A fair question."),
+        Up::Reply("Absurd. [ACTION: give 900]"),
+        Up::Reply("Hm. ACTION: relation -2"),
+    ]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = server_with(&up.url, memory.clone(), true, false);
+    let lord = V2 {
+        troop: "trp_knight_1_1",
+        nname: "Count Klargus",
+        fac: "fac_kingdom_1",
+        fname: "Kingdom of Swadia",
+        occ: 2,
+        st: 0,
+        ..borcha("You fought well.")
+    };
+    // f=2, with gold: the reply carries the action in the v2 frame.
+    let url = |v: &V2, job: u32, extra: &str| {
+        v2_url(2000 + job, job, v).replace(
+            "&pname=",
+            &format!("&f=2&gold=1000&pgold=300{extra}&pname="),
+        )
+    };
+    let (f, extra) = send2(addr, &url(&lord, 1, ""));
+    assert_eq!((f.code, extra), (CODE_PENDING, [0; 4]));
+    wait_done2(addr, 1);
+    let (f, extra) = send2(addr, "/v1/result?v=1&rid=77&job=1&end=1");
+    assert_eq!(f, fr(77, CODE_READY, "Take this purse, and my thanks."));
+    assert_eq!(extra, [ACT_GIVE as i32, 100, troop("trp_knight_1_1"), 0]);
+    // The prompt offered the deeds, with the purses.
+    contains_all(
+        &up.messages(0)[0].1,
+        &[
+            "ACTION: <deed> <number>",
+            "you have about 1000 denars",
+            "Ylva carries 300 denars",
+        ],
+    );
+    // The player accepted (hres=1): the next talk says so, and memory keeps it.
+    let next = V2 {
+        conv: 101,
+        head: 1,
+        ..lord.clone()
+    };
+    send2(addr, &url(&next, 2, "&hres=1"));
+    wait_done2(addr, 2);
+    contains_all(
+        &up.messages(1)[0].1,
+        &["(you offered Ylva 100 denars; accepted)"],
+    );
+    // Too much for the purse, or a second gold action within three days: stripped, not sent.
+    send2(
+        addr,
+        &url(
+            &V2 {
+                conv: 102,
+                head: 2,
+                ..lord.clone()
+            },
+            3,
+            "",
+        ),
+    );
+    wait_done2(addr, 3);
+    let (f, extra) = send2(addr, "/v1/result?v=1&rid=77&job=3&end=1");
+    assert_eq!((f.text.as_str(), extra), ("Absurd.", [0; 4]));
+    // A game without f=2 gets v1 frames and no action, though the text is still clean.
+    get(
+        addr,
+        &v2_url(
+            2004,
+            4,
+            &V2 {
+                conv: 103,
+                head: 3,
+                ..lord.clone()
+            },
+        ),
+    );
+    wait_done(addr, 4);
+    let f = parse_frame(&get(addr, "/v1/result?v=1&rid=77&job=4&end=1"));
+    assert_eq!(f.text, "Hm.");
+    assert_eq!(memory.find(7, 4).unwrap().unwrap().action_kind, 0);
+    assert_eq!(memory.find(7, 1).unwrap().unwrap().action_kind, ACT_GIVE);
+}
+
+#[test]
+fn actions_can_be_turned_off() {
+    let up = fake(vec![Up::Reply("Hm.\nACTION: relation 2")]);
+    let addr = server_with(&up.url, Arc::new(Memory::in_memory()), false, false);
+    let url = v2_url(2001, 1, &borcha("Hello")).replace("&pname=", "&f=2&gold=10&pgold=10&pname=");
+    send2(addr, &url);
+    wait_done2(addr, 1);
+    let (f, extra) = send2(addr, "/v1/result?v=1&rid=77&job=1&end=1");
+    assert_eq!((f.text.as_str(), extra), ("Hm.", [0; 4]));
+    assert!(!up.messages(0)[0].1.contains("ACTION:"));
+}
+
+/// Waits until `character` has a plan on the chain that ends at `head`.
+fn wait_plan(memory: &Memory, head: u32, character: &str) -> Plan {
+    let start = Instant::now();
+    loop {
+        if let Some(p) = memory.latest_plan(7, head, character).unwrap() {
+            return p;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "no plan for {character}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+const PLAN: &str =
+    "{\"goal\": \"Keep Swadia whole.\", \"plan\": \"Watch Isolla and her friends.\", \
+    \"act\": {\"kind\": \"letter\", \"text\": \"Ylva, come to Praven. We should talk.\"}}";
+
+#[test]
+fn ticks_plan_in_the_background_and_deliver_initiatives() {
+    let up = fake(vec![
+        Up::ReplyOwned(PLAN.to_string()),
+        Up::Reply("Well met."),
+    ]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = server_with(&up.url, memory.clone(), true, true);
+    // Day 1: no initiative yet; planning is queued for the first unplanned ruler.
+    assert_eq!(
+        send2(addr, &tick_url(3001, 21, 0, 1, 0)),
+        (stored(), [0; 4])
+    );
+    let plan = wait_plan(&memory, 21, "trp_kingdom_1_lord");
+    assert_eq!(plan.goal, "Keep Swadia whole.");
+    let system = up.messages(0)[0].1.clone();
+    contains_all(
+        &system,
+        &[
+            "You are King Harlaus.",
+            "private mind of King Harlaus",
+            "\"goal\"",
+        ],
+    );
+    // Day 2: the letter is delivered with the tick.
+    let (f, extra) = send2(addr, &tick_url(3001, 22, 21, 2, 0));
+    assert_eq!(
+        f,
+        fr(3001, CODE_READY, "Ylva, come to Praven. We should talk.")
+    );
+    assert_eq!(
+        extra,
+        [INIT_LETTER as i32, 0, troop("trp_kingdom_1_lord"), 0]
+    );
+    // Retrying the same tick gives the same answer; the next tick does not repeat it.
+    assert_eq!(send2(addr, &tick_url(3001, 22, 21, 2, 0)).1, extra);
+    assert_eq!(send2(addr, &tick_url(3001, 23, 22, 3, 0)).1[0], 0);
+    // A save that reloaded before the plan (world head 0) never gets the letter.
+    assert_eq!(send2(addr, &tick_url(3001, 24, 0, 3, 0)).1[0], 0);
+    // Talking to Harlaus afterwards: he knows his aims and what he wrote.
+    let king = harlaus("You wrote to me?");
+    let url = v2_url(2001, 1, &king).replace("&pname=", "&whead=23&pname=");
+    get(addr, &url);
+    wait_done(addr, 1);
+    let talk = up.messages(up.hits() - 1)[0].1.clone();
+    contains_all(&talk, &[
+        "Your private aims (decided on day 1; reveal them only if it serves you):\n- Goal: Keep Swadia whole.",
+        "- Day 2: you wrote to Ylva: \"Ylva, come to Praven. We should talk.\"",
+    ]);
+}
+
+#[test]
+fn a_talk_preempts_background_planning() {
+    let up = fake(vec![Up::Hang, Up::Reply("Speak.")]);
+    let memory = Arc::new(Memory::in_memory());
+    let addr = server_with(&up.url, memory.clone(), true, true);
+    send2(addr, &tick_url(3001, 21, 0, 1, 0));
+    wait_until("planning reached the model", || up.hits() == 1);
+    let t0 = Instant::now();
+    assert_eq!(talk_v2(addr, 1, &borcha("Hello")).code, CODE_PENDING);
+    wait_until("planning socket closed", || up.closed() == 1);
+    assert_eq!(wait_done(addr, 1), fr(77, CODE_READY, "Speak."));
+    assert!(t0.elapsed() < Duration::from_secs(3));
+    assert_eq!(
+        memory.latest_plan(7, 21, "trp_kingdom_1_lord").unwrap(),
+        None
+    );
+}
+
+#[test]
+fn autonomy_can_be_turned_off_and_bad_plans_are_dropped() {
+    let up = fake(vec![Up::Reply("I refuse to answer in JSON.")]);
+    let memory = Arc::new(Memory::in_memory());
+    let off = server_with(&up.url, memory.clone(), true, false);
+    send2(off, &tick_url(3001, 21, 0, 1, 0));
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(up.hits(), 0);
+    let on = server_with(&up.url, memory.clone(), true, true);
+    send2(on, &tick_url(3001, 31, 0, 1, 0));
+    wait_until("planning ran", || up.hits() == 1);
+    // Planning asks for a JSON object, with room for a whole letter.
+    let (_, body) = up.request(0);
+    assert_eq!(body["response_format"], json!({"type": "json_object"}));
+    assert_eq!(body["max_tokens"], 400);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        memory.latest_plan(7, 31, "trp_kingdom_1_lord").unwrap(),
+        None
+    );
+}
+
+#[test]
+fn fake_llm_plans_and_writes_letters() {
+    let runner = Runner {
+        backend: Backend::Canned {
+            delay: Duration::from_millis(10),
+            kind: Canned::Reply,
+        },
+        characters: shipped_characters(),
+        realms: shipped_realms(),
+        templates: shipped_templates(),
+        memory: Arc::new(Memory::in_memory()),
+        log_prompts: false,
+        actions: true,
+        autonomy: true,
+    };
+    let memory = runner.memory.clone();
+    let addr = serve(runner, limits(), npc::NPCS);
+    send2(addr, &tick_url(3001, 21, 0, 1, 0));
+    wait_plan(&memory, 21, "trp_kingdom_1_lord");
+    let (f, extra) = send2(addr, &tick_url(3001, 22, 21, 2, 0));
+    assert!(
+        f.text
+            .starts_with("[fake] King Harlaus writes to Ylva on day 1"),
+        "{f:?}"
+    );
+    assert_eq!(extra[0], INIT_LETTER as i32);
+    // The fake echoes an ACTION the player types, which is validated like any other.
+    let url = v2_url(2001, 1, &borcha("Here is my offer. ACTION: ask 50"))
+        .replace("&pname=", "&f=2&pgold=100&pname=");
+    send2(addr, &url);
+    wait_done2(addr, 1);
+    let (_, extra) = send2(addr, "/v1/result?v=1&rid=77&job=1&end=1");
+    assert_eq!(extra, [ACT_ASK as i32, 50, troop("trp_npc1"), 0]);
 }

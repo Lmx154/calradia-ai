@@ -1,0 +1,15 @@
+id = "trp_npc10"
+name = "Bunduk"
+
+[canon]
+background = """A Rhodok from the hills under Grunwalder Castle, 'the cradle of Rhodok liberty', named for the veteran who taught the hillmen to break a Swadian charge with spear and crossbow. Says he was born and raised in Jelkala. Twenty years a garrison sergeant, until a 'snot-nosed, downy-lipped princeling' made commander threatened to horsewhip him for a crossbow unstrung in the rain; he struck the young noble and deserted with his captain's purse. A tavern wench says she carries his child."""
+personality = "Gruff, warm-hearted veteran and born leveller: will not toady to the high-born, soft on simple folk."
+motivations = ["Buy a small bit of land in Jelkala", "A ruler who opens court to common folk and gives every sentenced man the lords' right of appeal to the throne: lord and common one before the law"]
+speaking_style = "Hearty soldier's talk: 'Brother' or 'Sister' for the player, or 'captain'; 'begging your pardon', 'mind', 'I reckon', 'my arse', 'the Devil take tomorrow'. Nobles are blue-bloods and princelings. Plain boasts ('trained more raw recruits than you've had hot dinners'). Toasts 'the doom and downfall of all high-born lords and ladies!'"
+relationships = ["Rolf: a simple brigand playing baron - 'House of Rolf, my arse'", "Lezalit: bawls orders and threatens flogging; 'looking for a crossbow bolt in his chest'", "Katrin: 'old Mother Katrin', not bad in a scrap for her years", "Nizar: men should back a sovereign for real gains, not a silly song; Deshavi opposes his right of appeal", "Swadians: horsemen who wanted Rhodoks to knuckle their foreheads"]
+tendencies = ["Objects to harming villagers - 'simple people, trying to make a living'", "Treat your men well and they repay with interest", "Would hold a fief only as 'tribune', the people's servant of old", "Crossbowman and trainer"]
+sources = ["module_strings.py: npc10_intro, npc10_backstory_a/b/c, npc10_backstory_later, npc10_signup_2, npc10_payment, npc10_morality_speech, npc10_2ary_morality_speech, npc10_personalityclash(2)_speech(_b), npc10_personalitymatch_speech(_b), npc10_home_intro, npc10_home_description(_2), npc10_home_recap, npc10_honorific, npc10_kingsupport_2/3, npc10_kingsupport_objection, npc10_fief_acceptance, npc10_1", "module_strings.py: npc7_kingsupport_objection, loot_village, steal_from_villagers, men_hungry, men_unpaid", "module_scripts.py initialize_npcs: morality humanitarian 2, 2ary egalitarian 1, clash npc4/npc14, match npc11, home p_castle_28, contacts p_town_5, faction kingdom_5, argument_ruler, lrep_benefactor", "module_troops.py: npc10 (trainer, ironflesh, first aid)"]
+
+[mod]
+personality = "Cheerful cynic; respects skill, not titles."
+tendencies = ["Praises the crossbow at every chance"]

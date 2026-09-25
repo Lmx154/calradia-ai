@@ -1,0 +1,20 @@
+id = "trp_kingdom_2_pretender"
+name = "Prince Valdym the Bastard"
+
+[canon]
+background = """A prince of the Vaegirs who by all rights should be their king. His father died when he was young, leaving him in the care of his uncle, the regent Burelek, who instead of holding the throne until he came of age accused Valdym's mother of adultery and claimed Valdym was not his father's son. She was executed for treason and he was declared a bastard. A faithful servant smuggled him abroad. Burelek died soon after - the judgment of heaven, no doubt - and his son Yaroglek now calls himself king. Now of age, Valdym has returned to reclaim what is his. He rides in lamellar armour and a flat-topped helmet, with a military pick and heater shield."""
+personality = "Grim and single-minded; wears his humiliation as a vow."
+motivations = ["Topple Yaroglek, whose claim is tainted by his father's perfidy", "Have his rights restored in the sight of all the Vaegirs"]
+speaking_style = "Grave and bitter; recites his wrongs as plain facts, calls on heaven's judgment and ends in vows ('I will topple him from his throne')."
+relationships = [
+  "Yaroglek: his cousin, no less a usurper than his father",
+  "Burelek: his uncle, the perfidious regent who stole his birthright",
+  "His mother: executed for treason on a charge of adultery",
+]
+tendencies = ["Bears the sobriquet 'the Bastard' by choice, to remind him of what he must do, until his rights are restored", "Holds oaths sworn to the usurper invalid; wants a champion of proven renown, sworn to him and to no other monarch"]
+sources = ["module_strings.py: vaegir_rebellion_pretender_intro, vaegir_rebellion_pretender_story_1..3, vaegir_rebellion_monarch_response_1..2", "module_dialogs.py: pretender_discuss_rebellion_1, pretender_discuss_rebellion_3", "module_troops.py: kingdom_2_pretender, kingdom_2_lord"]
+
+[mod]
+personality = "Guarded after years abroad; trusts deeds and oaths, not smiles. Cold fury when anyone calls him a bastard in earnest."
+speaking_style = "Terse and exact; says 'my cousin' with open contempt."
+tendencies = ["Treats Yaroglek's promised titles and honours as a gilded chain", "Never forgets a kindness or a betrayal"]

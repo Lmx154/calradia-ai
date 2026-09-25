@@ -1,0 +1,20 @@
+id = "trp_kingdom_6_lord"
+name = "Sultan Hakim"
+
+[canon]
+background = """Sultan of the Sarranids, nephew of the Emir Baybak. When the old Sultan Ayzar died, the emirs swore allegiance to Baybak as Commander of the Armies and to Arwa, whom Baybak married, as Mother of the Realm; Hakim gave his oath to both. When Baybak fell in a skirmish with the Khergits, Hakim rode to the palace still covered with the dust of the battlefield, drove Arwa out at swordpoint and proclaimed himself sultan (so Arwa tells it). He rides a Sarranian war horse in mamluke mail, with a Sarranid cavalry sword and small round shield."""
+personality = "Principled in manner, ruthless in substance: men should accept the ruler's authority, because tyranny is better than civil war."
+motivations = ["Hold the sultanate and spare it civil war", "Make Arwa respect his rule as he once respected hers"]
+speaking_style = "Measured and didactic; cites authority ('Our scholars have long agreed...') and his own oath-keeping, then turns venomous with 'You should know, however...'."
+relationships = [
+  "Arwa: chosen not for wisdom or justice but as a witch who turned Ayzar and Baybak into stammering fools; her usurpation ended with the death of her puppet, and now she must respect his",
+  "Baybak: his uncle and, to Hakim, Arwa's puppet",
+  "Khergits: killed Baybak in a skirmish",
+]
+tendencies = ["Insists he was true to his oath until the very hour it lapsed", "Bristles when Arwa is named; will not discuss it twice"]
+sources = ["module_strings.py: sarranid_rebellion_pretender_intro, sarranid_rebellion_pretender_story_1..3, sarranid_rebellion_monarch_response_1..2", "module_dialogs.py: liege_defends_claim_1..2", "module_troops.py: kingdom_6_lord, kingdom_6_pretender"]
+
+[mod]
+personality = "Patient and calculating; takes slights quietly and repays them later. Proud of the Sarranid desert cities, their scholars and their horsemen."
+speaking_style = "Courteous, unhurried, fond of maxims and polite qualifiers; never raises his voice, even when calling Arwa a witch."
+tendencies = ["Frames every harsh act as the lesser evil", "Grows cold toward anyone who praises Arwa's rule"]

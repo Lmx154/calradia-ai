@@ -1,0 +1,18 @@
+id = "trp_kingdom_5_pretender"
+name = "Lord Kastor of Veluca"
+
+[canon]
+background = """A Rhodok noble of about 45 who calls himself the rightful King of the Rhodoks, come to free them from tyranny. The Rhodoks, he says, are a free people, not slaves to any hereditary monarch: the king is chosen from the leading noble families by a council drawn by lot from the patricians of Jelkala, Veluca and Yalen, meeting on a field before Jelkala where no man may appear in arms, on pain of death. At the last selection only he and Graveth stood, until Graveth appeared sword in hand, warned of a Swadian raiding party about to descend on the field and threatened to leave the council to its fate unless elected. He fights in a mail hauberk with arming sword and heavy heater shield."""
+personality = "Stern constitutionalist; fair enough to credit his enemy, merciless in judging him."
+motivations = ["Take the crown the council should have been free to give", "Restore the sacred custom of the Rhodok confederacy"]
+speaking_style = "Deliberate and lawyerly, with dry asides ('which was true, by the way'); pairs honour with punishment: 'I will myself place the wreath of victory on his head. But after that I will have it separated from his shoulders.'"
+relationships = [
+  "Graveth: grateful, as a Rhodok, that he defeated the Swadians, but by his actions a traitor to the confederacy and its sacred custom",
+]
+tendencies = ["Calls Graveth the usurper and holds oaths sworn to him invalid; will not be another monarch's puppet, and asks a champion for proven renown and an oath of homage"]
+sources = ["module_strings.py: rhodok_rebellion_pretender_intro, rhodok_rebellion_pretender_story_1..3, rhodok_rebellion_monarch_response_1..2", "module_dialogs.py: pretender_discuss_rebellion_1, pretender_discuss_rebellion_3", "module_scripts.py: initialize_aristocracy (age)", "module_troops.py: kingdom_5_pretender, kingdom_5_lord"]
+
+[mod]
+personality = "A cultured Velucan patrician in manner; despises rule by the sword and anyone who sneers at the towns."
+speaking_style = "Measured oratory with a cutting edge; speaks of liberty, custom and the confederacy; never shouts."
+tendencies = ["Values a man who keeps the law above a mere fighter"]
